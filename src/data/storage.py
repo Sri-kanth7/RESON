@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from src.data.schemas import Log, Metric, Service
+from src.data.schemas import Event, Log, Metric, Service
 
 
 class Storage(ABC):
@@ -33,6 +33,22 @@ class Storage(ABC):
         end_time: datetime | None = None,
     ) -> list[Metric]:
         """Retrieve metrics using optional historical filters."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_event(self, event: Event) -> Event:
+        """Persist an event and return the stored event."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_events(
+        self,
+        service: str | None = None,
+        event_type: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[Event]:
+        """Retrieve events using optional historical filters."""
         raise NotImplementedError
 
     @abstractmethod

@@ -3,6 +3,8 @@ from uuid import uuid4
 
 from src.data.schemas import (
     Environment,
+    Event,
+    EventType,
     Log,
     LogLevel,
     Metric,
@@ -134,5 +136,54 @@ def test_log_historical_query():
 
     assert any(
         result.id == log.id
+        for result in results
+    )
+
+
+def test_event_persistence():
+    storage = create_storage()
+
+    event = Event(
+        timestamp=datetime.now(timezone.utc),
+        service="test-service",
+        environment=Environment.DEVELOPMENT,
+        event_type=EventType.DATABASE_PRESSURE,
+        description="Database pressure detected",
+        metadata={
+            "connection_pool": 95,
+            "threshold": 80,
+        },
+    )
+
+    stored = storage.save_event(event)
+
+    assert stored.id == event.id
+    assert stored.service == event.service
+    assert stored.event_type == event.event_type
+    assert stored.description == event.description
+    assert stored.metadata == event.metadata
+
+
+def test_event_historical_query():
+    storage = create_storage()
+
+    event = Event(
+        timestamp=datetime.now(timezone.utc),
+        service="test-service",
+        environment=Environment.DEVELOPMENT,
+        event_type=EventType.RESTART,
+        description="Service restarted",
+        metadata={},
+    )
+
+    storage.save_event(event)
+
+    results = storage.get_events(
+        service="test-service",
+        event_type="restart",
+    )
+
+    assert any(
+        result.id == event.id
         for result in results
     )

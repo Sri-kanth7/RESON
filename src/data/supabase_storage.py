@@ -4,7 +4,7 @@ from datetime import datetime
 
 from supabase import Client
 
-from src.data.schemas import Log, Metric, Service
+from src.data.schemas import Event, Log, Metric, Service
 from src.data.storage import Storage
 
 
@@ -147,6 +147,90 @@ class SupabaseStorage(Storage):
 
         return [
             Metric.model_validate(row)
+            for row in response.data
+        ]
+
+    def save_event(self, event: Event) -> Event:
+        """Insert an event and return the domain model."""
+
+        payload = {
+            "id": str(event.id),
+            "timestamp": event.timestamp.isoformat(),
+            "service": event.service,
+            "environment": event.environment,
+            "event_type": event.event_type,
+            "description": event.description,
+            "metadata": event.metadata,
+        }
+
+        response = (
+            self._client
+            .table("events")
+            .insert(payload)
+            .execute()
+        )
+
+        if not response.data:
+            raise RuntimeError("Failed to save event.")
+
+        row = response.data[0]
+
+        return Event.model_validate(
+            {
+                "id": row["id"],
+                "timestamp": row["timestamp"],
+                "service": row["service"],
+                "environment": row["environment"],
+                "event_type": row["event_type"],
+                "description": row["description"],
+                "metadata": row["metadata"],
+            }
+        )
+
+    def get_events(
+        self,
+        service: str | None = None,
+        event_type: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[Event]:
+        """Retrieve events using optional historical filters."""
+
+        query = (
+            self._client
+            .table("events")
+            .select(
+                "id, timestamp, service, environment, "
+                "event_type, description, metadata"
+            )
+        )
+
+        if service is not None:
+            query = query.eq("service", service)
+
+        if event_type is not None:
+            query = query.eq("event_type", event_type)
+
+        if start_time is not None:
+            query = query.gte(
+                "timestamp",
+                start_time.isoformat(),
+            )
+
+        if end_time is not None:
+            query = query.lte(
+                "timestamp",
+                end_time.isoformat(),
+            )
+
+        response = (
+            query
+            .order("timestamp", desc=False)
+            .execute()
+        )
+
+        return [
+            Event.model_validate(row)
             for row in response.data
         ]
 
