@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from src.data.schemas import Deployment, Event, Log, Metric, Service
+from src.data.schemas import Deployment, Event, Incident, Log, Metric, Service
 
 
 class Storage(ABC):
@@ -33,6 +33,23 @@ class Storage(ABC):
         end_time: datetime | None = None,
     ) -> list[Metric]:
         """Retrieve metrics using optional historical filters."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_incident(self, incident: Incident) -> Incident:
+        """Persist an incident and return the stored incident."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_incidents(
+        self,
+        severity: str | None = None,
+        status: str | None = None,
+        scenario: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[Incident]:
+        """Retrieve incidents using optional historical filters."""
         raise NotImplementedError
 
     @abstractmethod

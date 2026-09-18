@@ -4,7 +4,7 @@ from datetime import datetime
 
 from supabase import Client
 
-from src.data.schemas import Deployment, Event, Log, Metric, Service
+from src.data.schemas import Deployment, Event, Incident, Log, Metric, Service
 from src.data.storage import Storage
 
 
@@ -147,6 +147,100 @@ class SupabaseStorage(Storage):
 
         return [
             Metric.model_validate(row)
+            for row in response.data
+        ]
+
+    def save_incident(self, incident: Incident) -> Incident:
+        """Insert an incident and return the domain model."""
+
+        payload = {
+            "id": str(incident.id),
+            "title": incident.title,
+            "start_time": incident.start_time.isoformat(),
+            "end_time": (
+                incident.end_time.isoformat()
+                if incident.end_time is not None
+                else None
+            ),
+            "severity": incident.severity,
+            "status": incident.status,
+            "scenario": incident.scenario,
+            "affected_services": incident.affected_services,
+        }
+
+        response = (
+            self._client
+            .table("incidents")
+            .insert(payload)
+            .execute()
+        )
+
+        if not response.data:
+            raise RuntimeError("Failed to save incident.")
+
+        row = response.data[0]
+
+        return Incident.model_validate(
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "start_time": row["start_time"],
+                "end_time": row["end_time"],
+                "severity": row["severity"],
+                "status": row["status"],
+                "scenario": row["scenario"],
+                "affected_services": row["affected_services"],
+            }
+        )
+
+    def get_incidents(
+        self,
+        severity: str | None = None,
+        status: str | None = None,
+        scenario: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[Incident]:
+        """Retrieve incidents using optional historical filters."""
+
+        query = (
+            self._client
+            .table("incidents")
+            .select(
+                "id, title, start_time, end_time, "
+                "severity, status, scenario, affected_services"
+            )
+        )
+
+        if severity is not None:
+            query = query.eq("severity", severity)
+
+        if status is not None:
+            query = query.eq("status", status)
+
+        if scenario is not None:
+            query = query.eq("scenario", scenario)
+
+        if start_time is not None:
+            query = query.gte(
+                "start_time",
+                start_time.isoformat(),
+            )
+
+        if end_time is not None:
+            query = query.lte(
+                "start_time",
+                end_time.isoformat(),
+            )
+
+        response = (
+            query
+            .order("start_time", desc=False)
+            .execute()
+        )
+
+        return [
+            Incident.model_validate(row)
             for row in response.data
         ]
 

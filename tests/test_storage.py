@@ -5,6 +5,9 @@ from src.data.schemas import (
     Deployment,
     DeploymentStatus,
     Environment,
+    Incident,
+    IncidentSeverity,
+    IncidentStatus,
     Event,
     EventType,
     Log,
@@ -236,5 +239,58 @@ def test_deployment_historical_query():
 
     assert any(
         result.id == deployment.id
+        for result in results
+    )
+
+
+def test_incident_persistence():
+    storage = create_storage()
+
+    incident = Incident(
+        title="Database latency spike",
+        start_time=datetime.now(timezone.utc),
+        end_time=None,
+        severity=IncidentSeverity.HIGH,
+        status=IncidentStatus.OPEN,
+        scenario="database_latency",
+        affected_services=[
+            "api-service",
+            "database-service",
+        ],
+    )
+
+    stored = storage.save_incident(incident)
+
+    assert stored.id == incident.id
+    assert stored.title == incident.title
+    assert stored.severity == incident.severity
+    assert stored.status == incident.status
+    assert stored.scenario == incident.scenario
+    assert stored.affected_services == incident.affected_services
+
+
+def test_incident_historical_query():
+    storage = create_storage()
+
+    incident = Incident(
+        title="Historical service failure",
+        start_time=datetime.now(timezone.utc),
+        end_time=None,
+        severity=IncidentSeverity.CRITICAL,
+        status=IncidentStatus.RESOLVED,
+        scenario="service_failure",
+        affected_services=["test-service"],
+    )
+
+    storage.save_incident(incident)
+
+    results = storage.get_incidents(
+        severity="critical",
+        status="resolved",
+        scenario="service_failure",
+    )
+
+    assert any(
+        result.id == incident.id
         for result in results
     )
