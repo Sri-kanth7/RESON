@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from src.data.schemas import Event, Log, Metric, Service
+from src.data.schemas import Deployment, Event, Log, Metric, Service
 
 
 class Storage(ABC):
@@ -33,6 +33,25 @@ class Storage(ABC):
         end_time: datetime | None = None,
     ) -> list[Metric]:
         """Retrieve metrics using optional historical filters."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_deployment(
+        self,
+        deployment: Deployment,
+    ) -> Deployment:
+        """Persist a deployment and return the stored deployment."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_deployments(
+        self,
+        service: str | None = None,
+        status: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[Deployment]:
+        """Retrieve deployments using optional historical filters."""
         raise NotImplementedError
 
     @abstractmethod

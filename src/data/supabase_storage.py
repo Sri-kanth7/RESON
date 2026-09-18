@@ -4,7 +4,7 @@ from datetime import datetime
 
 from supabase import Client
 
-from src.data.schemas import Event, Log, Metric, Service
+from src.data.schemas import Deployment, Event, Log, Metric, Service
 from src.data.storage import Storage
 
 
@@ -147,6 +147,93 @@ class SupabaseStorage(Storage):
 
         return [
             Metric.model_validate(row)
+            for row in response.data
+        ]
+
+    def save_deployment(
+        self,
+        deployment: Deployment,
+    ) -> Deployment:
+        """Insert a deployment and return the domain model."""
+
+        payload = {
+            "id": str(deployment.id),
+            "timestamp": deployment.timestamp.isoformat(),
+            "service": deployment.service,
+            "environment": deployment.environment,
+            "version": deployment.version,
+            "status": deployment.status,
+            "metadata": deployment.metadata,
+        }
+
+        response = (
+            self._client
+            .table("deployments")
+            .insert(payload)
+            .execute()
+        )
+
+        if not response.data:
+            raise RuntimeError("Failed to save deployment.")
+
+        row = response.data[0]
+
+        return Deployment.model_validate(
+            {
+                "id": row["id"],
+                "timestamp": row["timestamp"],
+                "service": row["service"],
+                "environment": row["environment"],
+                "version": row["version"],
+                "status": row["status"],
+                "metadata": row["metadata"],
+            }
+        )
+
+    def get_deployments(
+        self,
+        service: str | None = None,
+        status: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[Deployment]:
+        """Retrieve deployments using optional historical filters."""
+
+        query = (
+            self._client
+            .table("deployments")
+            .select(
+                "id, timestamp, service, environment, "
+                "version, status, metadata"
+            )
+        )
+
+        if service is not None:
+            query = query.eq("service", service)
+
+        if status is not None:
+            query = query.eq("status", status)
+
+        if start_time is not None:
+            query = query.gte(
+                "timestamp",
+                start_time.isoformat(),
+            )
+
+        if end_time is not None:
+            query = query.lte(
+                "timestamp",
+                end_time.isoformat(),
+            )
+
+        response = (
+            query
+            .order("timestamp", desc=False)
+            .execute()
+        )
+
+        return [
+            Deployment.model_validate(row)
             for row in response.data
         ]
 

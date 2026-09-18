@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from src.data.schemas import (
+    Deployment,
+    DeploymentStatus,
     Environment,
     Event,
     EventType,
@@ -185,5 +187,54 @@ def test_event_historical_query():
 
     assert any(
         result.id == event.id
+        for result in results
+    )
+
+
+def test_deployment_persistence():
+    storage = create_storage()
+
+    deployment = Deployment(
+        timestamp=datetime.now(timezone.utc),
+        service="test-service",
+        environment=Environment.DEVELOPMENT,
+        version="2.0.0",
+        status=DeploymentStatus.SUCCESS,
+        metadata={
+            "commit": "abc123",
+            "author": "test-user",
+        },
+    )
+
+    stored = storage.save_deployment(deployment)
+
+    assert stored.id == deployment.id
+    assert stored.service == deployment.service
+    assert stored.version == deployment.version
+    assert stored.status == deployment.status
+    assert stored.metadata == deployment.metadata
+
+
+def test_deployment_historical_query():
+    storage = create_storage()
+
+    deployment = Deployment(
+        timestamp=datetime.now(timezone.utc),
+        service="test-service",
+        environment=Environment.DEVELOPMENT,
+        version="3.0.0",
+        status=DeploymentStatus.FAILED,
+        metadata={},
+    )
+
+    storage.save_deployment(deployment)
+
+    results = storage.get_deployments(
+        service="test-service",
+        status="failed",
+    )
+
+    assert any(
+        result.id == deployment.id
         for result in results
     )
