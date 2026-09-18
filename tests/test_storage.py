@@ -1,7 +1,13 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from src.data.schemas import Environment, Metric, Service
+from src.data.schemas import (
+    Environment,
+    Log,
+    LogLevel,
+    Metric,
+    Service,
+)
 from src.data.supabase_client import get_supabase_client
 from src.data.supabase_storage import SupabaseStorage
 
@@ -79,5 +85,54 @@ def test_metric_historical_query():
 
     assert any(
         result.id == metric.id
+        for result in results
+    )
+
+
+def test_log_persistence():
+    storage = create_storage()
+
+    log = Log(
+        timestamp=datetime.now(timezone.utc),
+        service="test-service",
+        environment=Environment.DEVELOPMENT,
+        level=LogLevel.ERROR,
+        message="Database connection failed",
+        metadata={
+            "request_id": "test-request",
+            "attempt": 1,
+        },
+    )
+
+    stored = storage.save_log(log)
+
+    assert stored.id == log.id
+    assert stored.service == log.service
+    assert stored.level == log.level
+    assert stored.message == log.message
+    assert stored.metadata == log.metadata
+
+
+def test_log_historical_query():
+    storage = create_storage()
+
+    log = Log(
+        timestamp=datetime.now(timezone.utc),
+        service="test-service",
+        environment=Environment.DEVELOPMENT,
+        level=LogLevel.ERROR,
+        message="Historical test error",
+        metadata={},
+    )
+
+    storage.save_log(log)
+
+    results = storage.get_logs(
+        service="test-service",
+        level="ERROR",
+    )
+
+    assert any(
+        result.id == log.id
         for result in results
     )

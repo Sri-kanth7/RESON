@@ -4,7 +4,7 @@ from datetime import datetime
 
 from supabase import Client
 
-from src.data.schemas import Metric, Service
+from src.data.schemas import Log, Metric, Service
 from src.data.storage import Storage
 
 
@@ -37,8 +37,6 @@ class SupabaseStorage(Storage):
 
         row = response.data[0]
 
-        # The database also returns fields such as created_at.
-        # Only map fields that belong to the Service domain model.
         return Service.model_validate(
             {
                 "id": row["id"],
@@ -93,8 +91,6 @@ class SupabaseStorage(Storage):
 
         row = response.data[0]
 
-        # Explicit mapping keeps database-only fields from leaking
-        # into the Pydantic domain model.
         return Metric.model_validate(
             {
                 "id": row["id"],
@@ -151,5 +147,89 @@ class SupabaseStorage(Storage):
 
         return [
             Metric.model_validate(row)
+            for row in response.data
+        ]
+
+    def save_log(self, log: Log) -> Log:
+        """Insert a log and return the domain model."""
+
+        payload = {
+            "id": str(log.id),
+            "timestamp": log.timestamp.isoformat(),
+            "service": log.service,
+            "environment": log.environment,
+            "level": log.level,
+            "message": log.message,
+            "metadata": log.metadata,
+        }
+
+        response = (
+            self._client
+            .table("logs")
+            .insert(payload)
+            .execute()
+        )
+
+        if not response.data:
+            raise RuntimeError("Failed to save log.")
+
+        row = response.data[0]
+
+        return Log.model_validate(
+            {
+                "id": row["id"],
+                "timestamp": row["timestamp"],
+                "service": row["service"],
+                "environment": row["environment"],
+                "level": row["level"],
+                "message": row["message"],
+                "metadata": row["metadata"],
+            }
+        )
+
+    def get_logs(
+        self,
+        service: str | None = None,
+        level: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[Log]:
+        """Retrieve logs using optional historical filters."""
+
+        query = (
+            self._client
+            .table("logs")
+            .select(
+                "id, timestamp, service, environment, "
+                "level, message, metadata"
+            )
+        )
+
+        if service is not None:
+            query = query.eq("service", service)
+
+        if level is not None:
+            query = query.eq("level", level)
+
+        if start_time is not None:
+            query = query.gte(
+                "timestamp",
+                start_time.isoformat(),
+            )
+
+        if end_time is not None:
+            query = query.lte(
+                "timestamp",
+                end_time.isoformat(),
+            )
+
+        response = (
+            query
+            .order("timestamp", desc=False)
+            .execute()
+        )
+
+        return [
+            Log.model_validate(row)
             for row in response.data
         ]
