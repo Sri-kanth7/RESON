@@ -4,7 +4,7 @@ from datetime import datetime
 
 from supabase import Client
 
-from src.data.schemas import Deployment, Event, Incident, Log, Metric, Service
+from src.data.schemas import Deployment, Event, Evidence, Incident, Log, Metric, Service
 from src.data.storage import Storage
 
 
@@ -147,6 +147,110 @@ class SupabaseStorage(Storage):
 
         return [
             Metric.model_validate(row)
+            for row in response.data
+        ]
+
+    def save_evidence(self, evidence: Evidence) -> Evidence:
+        """Insert an evidence relationship and return the domain model."""
+
+        payload = {
+            "id": str(evidence.id),
+            "source_id": str(evidence.source_id),
+            "source_type": evidence.source_type,
+            "target_id": str(evidence.target_id),
+            "target_type": evidence.target_type,
+            "relationship_type": evidence.relationship_type,
+            "timestamp": evidence.timestamp.isoformat(),
+            "strength": evidence.strength,
+            "explanation": evidence.explanation,
+        }
+
+        response = (
+            self._client
+            .table("evidence")
+            .insert(payload)
+            .execute()
+        )
+
+        if not response.data:
+            raise RuntimeError("Failed to save evidence.")
+
+        row = response.data[0]
+
+        return Evidence.model_validate(
+            {
+                "id": row["id"],
+                "source_id": row["source_id"],
+                "source_type": row["source_type"],
+                "target_id": row["target_id"],
+                "target_type": row["target_type"],
+                "relationship_type": row["relationship_type"],
+                "timestamp": row["timestamp"],
+                "strength": row["strength"],
+                "explanation": row["explanation"],
+            }
+        )
+
+    def get_evidence(
+        self,
+        source_id: str | None = None,
+        source_type: str | None = None,
+        target_id: str | None = None,
+        target_type: str | None = None,
+        relationship_type: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[Evidence]:
+        """Retrieve evidence relationships using optional filters."""
+
+        query = (
+            self._client
+            .table("evidence")
+            .select(
+                "id, source_id, source_type, target_id, "
+                "target_type, relationship_type, timestamp, "
+                "strength, explanation"
+            )
+        )
+
+        if source_id is not None:
+            query = query.eq("source_id", source_id)
+
+        if source_type is not None:
+            query = query.eq("source_type", source_type)
+
+        if target_id is not None:
+            query = query.eq("target_id", target_id)
+
+        if target_type is not None:
+            query = query.eq("target_type", target_type)
+
+        if relationship_type is not None:
+            query = query.eq(
+                "relationship_type",
+                relationship_type,
+            )
+
+        if start_time is not None:
+            query = query.gte(
+                "timestamp",
+                start_time.isoformat(),
+            )
+
+        if end_time is not None:
+            query = query.lte(
+                "timestamp",
+                end_time.isoformat(),
+            )
+
+        response = (
+            query
+            .order("timestamp", desc=False)
+            .execute()
+        )
+
+        return [
+            Evidence.model_validate(row)
             for row in response.data
         ]
 

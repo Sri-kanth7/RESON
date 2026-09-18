@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from src.data.schemas import Deployment, Event, Incident, Log, Metric, Service
+from src.data.schemas import Deployment, Event, Evidence, Incident, Log, Metric, Service
 
 
 class Storage(ABC):
@@ -33,6 +33,25 @@ class Storage(ABC):
         end_time: datetime | None = None,
     ) -> list[Metric]:
         """Retrieve metrics using optional historical filters."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_evidence(self, evidence: Evidence) -> Evidence:
+        """Persist an evidence relationship and return the stored evidence."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_evidence(
+        self,
+        source_id: str | None = None,
+        source_type: str | None = None,
+        target_id: str | None = None,
+        target_type: str | None = None,
+        relationship_type: str | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+    ) -> list[Evidence]:
+        """Retrieve evidence relationships using optional filters."""
         raise NotImplementedError
 
     @abstractmethod

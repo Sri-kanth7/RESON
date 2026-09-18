@@ -10,6 +10,8 @@ from src.data.schemas import (
     IncidentStatus,
     Event,
     EventType,
+    Evidence,
+    EvidenceType,
     Log,
     LogLevel,
     Metric,
@@ -292,5 +294,65 @@ def test_incident_historical_query():
 
     assert any(
         result.id == incident.id
+        for result in results
+    )
+
+
+def test_evidence_persistence():
+    storage = create_storage()
+
+    source_id = uuid4()
+    target_id = uuid4()
+
+    evidence = Evidence(
+        source_id=source_id,
+        source_type=EvidenceType.DEPLOYMENT,
+        target_id=target_id,
+        target_type=EvidenceType.INCIDENT,
+        relationship_type="temporal",
+        timestamp=datetime.now(timezone.utc),
+        strength=0.92,
+        explanation="Deployment occurred shortly before the incident.",
+    )
+
+    stored = storage.save_evidence(evidence)
+
+    assert stored.id == evidence.id
+    assert stored.source_id == source_id
+    assert stored.source_type == evidence.source_type
+    assert stored.target_id == target_id
+    assert stored.target_type == evidence.target_type
+    assert stored.relationship_type == evidence.relationship_type
+    assert stored.strength == evidence.strength
+    assert stored.explanation == evidence.explanation
+
+
+def test_evidence_historical_query():
+    storage = create_storage()
+
+    source_id = uuid4()
+    target_id = uuid4()
+
+    evidence = Evidence(
+        source_id=source_id,
+        source_type=EvidenceType.EVENT,
+        target_id=target_id,
+        target_type=EvidenceType.INCIDENT,
+        relationship_type="correlation",
+        timestamp=datetime.now(timezone.utc),
+        strength=0.85,
+        explanation="Event supports the incident timeline.",
+    )
+
+    storage.save_evidence(evidence)
+
+    results = storage.get_evidence(
+        source_id=str(source_id),
+        target_id=str(target_id),
+        relationship_type="correlation",
+    )
+
+    assert any(
+        result.id == evidence.id
         for result in results
     )
