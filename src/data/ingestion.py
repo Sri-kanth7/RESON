@@ -68,11 +68,41 @@ class TelemetryIngestionService:
         self,
         records: Iterable[TelemetryRecord],
     ) -> IngestionResult:
-        """Ingest a batch of telemetry records.
+        """Ingest a batch using type-specific bulk persistence operations."""
+        metrics: list[Metric] = []
+        logs: list[Log] = []
+        events: list[Event] = []
+        deployments: list[Deployment] = []
 
-        The first implementation deliberately reuses the validated
-        single-record ingestion path. This gives RESON a stable batch
-        API without prematurely coupling ingestion to a particular
-        database bulk-insert implementation.
-        """
-        return self.ingest(records)
+        for record in records:
+            if isinstance(record, Metric):
+                metrics.append(record)
+            elif isinstance(record, Log):
+                logs.append(record)
+            elif isinstance(record, Event):
+                events.append(record)
+            elif isinstance(record, Deployment):
+                deployments.append(record)
+            else:
+                raise TypeError(
+                    f"Unsupported telemetry record type: {type(record).__name__}"
+                )
+
+        if metrics:
+            self._storage.save_metrics(metrics)
+
+        if logs:
+            self._storage.save_logs(logs)
+
+        if events:
+            self._storage.save_events(events)
+
+        if deployments:
+            self._storage.save_deployments(deployments)
+
+        return IngestionResult(
+            metrics=len(metrics),
+            logs=len(logs),
+            events=len(events),
+            deployments=len(deployments),
+        )

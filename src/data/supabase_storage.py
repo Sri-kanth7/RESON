@@ -103,6 +103,39 @@ class SupabaseStorage(Storage):
             }
         )
 
+    def save_metrics(self, metrics: list[Metric]) -> list[Metric]:
+        """Persist multiple metrics in a single database request."""
+        if not metrics:
+            return []
+
+        payloads = [
+            {
+                "id": str(metric.id),
+                "timestamp": metric.timestamp.isoformat(),
+                "service": metric.service,
+                "environment": metric.environment,
+                "metric_name": metric.metric_name,
+                "value": metric.value,
+                "unit": metric.unit,
+            }
+            for metric in metrics
+        ]
+
+        response = (
+            self._client
+            .table("metrics")
+            .insert(payloads)
+            .execute()
+        )
+
+        if len(response.data) != len(metrics):
+            raise RuntimeError("Failed to save all metrics.")
+
+        return [
+            Metric.model_validate(row)
+            for row in response.data
+        ]
+
     def get_metrics(
         self,
         service: str | None = None,
@@ -388,6 +421,42 @@ class SupabaseStorage(Storage):
             }
         )
 
+    def save_deployments(
+        self,
+        deployments: list[Deployment],
+    ) -> list[Deployment]:
+        """Persist multiple deployments in a single database request."""
+        if not deployments:
+            return []
+
+        payloads = [
+            {
+                "id": str(deployment.id),
+                "timestamp": deployment.timestamp.isoformat(),
+                "service": deployment.service,
+                "environment": deployment.environment,
+                "version": deployment.version,
+                "status": deployment.status,
+                "metadata": deployment.metadata,
+            }
+            for deployment in deployments
+        ]
+
+        response = (
+            self._client
+            .table("deployments")
+            .insert(payloads)
+            .execute()
+        )
+
+        if len(response.data) != len(deployments):
+            raise RuntimeError("Failed to save all deployments.")
+
+        return [
+            Deployment.model_validate(row)
+            for row in response.data
+        ]
+
     def get_deployments(
         self,
         service: str | None = None,
@@ -472,6 +541,39 @@ class SupabaseStorage(Storage):
             }
         )
 
+    def save_events(self, events: list[Event]) -> list[Event]:
+        """Persist multiple events in a single database request."""
+        if not events:
+            return []
+
+        payloads = [
+            {
+                "id": str(event.id),
+                "timestamp": event.timestamp.isoformat(),
+                "service": event.service,
+                "environment": event.environment,
+                "event_type": event.event_type,
+                "description": event.description,
+                "metadata": event.metadata,
+            }
+            for event in events
+        ]
+
+        response = (
+            self._client
+            .table("events")
+            .insert(payloads)
+            .execute()
+        )
+
+        if len(response.data) != len(events):
+            raise RuntimeError("Failed to save all events.")
+
+        return [
+            Event.model_validate(row)
+            for row in response.data
+        ]
+
     def get_events(
         self,
         service: str | None = None,
@@ -555,6 +657,39 @@ class SupabaseStorage(Storage):
                 "metadata": row["metadata"],
             }
         )
+
+    def save_logs(self, logs: list[Log]) -> list[Log]:
+        """Persist multiple logs in a single database request."""
+        if not logs:
+            return []
+
+        payloads = [
+            {
+                "id": str(log.id),
+                "timestamp": log.timestamp.isoformat(),
+                "service": log.service,
+                "environment": log.environment,
+                "level": log.level,
+                "message": log.message,
+                "metadata": log.metadata,
+            }
+            for log in logs
+        ]
+
+        response = (
+            self._client
+            .table("logs")
+            .insert(payloads)
+            .execute()
+        )
+
+        if len(response.data) != len(logs):
+            raise RuntimeError("Failed to save all logs.")
+
+        return [
+            Log.model_validate(row)
+            for row in response.data
+        ]
 
     def get_logs(
         self,

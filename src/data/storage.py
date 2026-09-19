@@ -3,7 +3,15 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from src.data.schemas import Deployment, Event, Evidence, Incident, Log, Metric, Service
+from src.data.schemas import (
+    Deployment,
+    Event,
+    Evidence,
+    Incident,
+    Log,
+    Metric,
+    Service,
+)
 
 
 class Storage(ABC):
@@ -22,6 +30,11 @@ class Storage(ABC):
     @abstractmethod
     def save_metric(self, metric: Metric) -> Metric:
         """Persist a metric and return the stored metric."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_metrics(self, metrics: list[Metric]) -> list[Metric]:
+        """Persist multiple metrics efficiently."""
         raise NotImplementedError
 
     @abstractmethod
@@ -80,6 +93,14 @@ class Storage(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_deployments(
+        self,
+        deployments: list[Deployment],
+    ) -> list[Deployment]:
+        """Persist multiple deployments efficiently."""
+        raise NotImplementedError
+
+    @abstractmethod
     def get_deployments(
         self,
         service: str | None = None,
@@ -96,6 +117,11 @@ class Storage(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def save_events(self, events: list[Event]) -> list[Event]:
+        """Persist multiple events efficiently."""
+        raise NotImplementedError
+
+    @abstractmethod
     def get_events(
         self,
         service: str | None = None,
@@ -109,6 +135,11 @@ class Storage(ABC):
     @abstractmethod
     def save_log(self, log: Log) -> Log:
         """Persist a log and return the stored log."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_logs(self, logs: list[Log]) -> list[Log]:
+        """Persist multiple logs efficiently."""
         raise NotImplementedError
 
     @abstractmethod
