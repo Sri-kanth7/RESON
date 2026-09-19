@@ -206,3 +206,64 @@ def test_simulator_batch_can_flow_through_ingestion():
     assert result.events == 1
     assert result.deployments == 1
     assert result.total == 20
+
+
+def test_ingest_batch_matches_single_record_ingestion():
+    from datetime import datetime, timezone
+
+    from src.data.schemas import Environment, LogLevel, Metric
+
+    storage = FakeStorage()
+    ingestion = TelemetryIngestionService(storage)
+
+    records = [
+        Metric(
+            timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            service="api-service",
+            environment=Environment.DEVELOPMENT,
+            metric_name="latency",
+            value=125.0,
+            unit="ms",
+        ),
+        Log(
+            timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            service="api-service",
+            environment=Environment.DEVELOPMENT,
+            level=LogLevel.INFO,
+            message="Request completed",
+        ),
+    ]
+
+    result = ingestion.ingest_batch(records)
+
+    assert result.metrics == 1
+    assert result.logs == 1
+    assert result.events == 0
+    assert result.deployments == 0
+    assert result.total == 2
+
+    assert len(storage.metrics) == 1
+    assert len(storage.logs) == 1
+
+
+def test_simulator_batch_uses_batch_ingestion():
+    from datetime import datetime, timezone
+
+    from src.data.simulator import SystemSimulator
+
+    storage = FakeStorage()
+    ingestion = TelemetryIngestionService(storage)
+    simulator = SystemSimulator(seed=42)
+
+    batch = simulator.generate_batch(
+        timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        scenario="deployment",
+    )
+
+    result = ingestion.ingest_batch(batch.records())
+
+    assert result.metrics == 15
+    assert result.logs == 3
+    assert result.events == 1
+    assert result.deployments == 1
+    assert result.total == 20

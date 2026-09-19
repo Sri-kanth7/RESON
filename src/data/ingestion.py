@@ -3,21 +3,15 @@
 from dataclasses import dataclass
 from typing import Iterable
 
-from src.data.schemas import (
-    Deployment,
-    Event,
-    Log,
-    Metric,
-)
+from src.data.schemas import Deployment, Event, Log, Metric
 from src.data.storage import Storage
-
 
 TelemetryRecord = Metric | Log | Event | Deployment
 
 
 @dataclass(frozen=True)
 class IngestionResult:
-    """Summary of one ingestion operation."""
+    """Summary of records successfully ingested."""
 
     metrics: int = 0
     logs: int = 0
@@ -27,31 +21,18 @@ class IngestionResult:
     @property
     def total(self) -> int:
         """Return the total number of ingested records."""
-
-        return (
-            self.metrics
-            + self.logs
-            + self.events
-            + self.deployments
-        )
+        return self.metrics + self.logs + self.events + self.deployments
 
 
 class TelemetryIngestionService:
-    """Persist validated telemetry through the Storage interface."""
+    """Validate and route telemetry records to persistent storage."""
 
     def __init__(self, storage: Storage) -> None:
         self._storage = storage
 
-    def ingest(
-        self,
-        records: Iterable[TelemetryRecord],
-    ) -> IngestionResult:
-        """Persist a collection of telemetry records."""
-
-        metrics = 0
-        logs = 0
-        events = 0
-        deployments = 0
+    def ingest(self, records: Iterable[TelemetryRecord]) -> IngestionResult:
+        """Ingest telemetry records one at a time."""
+        metrics = logs = events = deployments = 0
 
         for record in records:
             if isinstance(record, Metric):
@@ -82,3 +63,16 @@ class TelemetryIngestionService:
             events=events,
             deployments=deployments,
         )
+
+    def ingest_batch(
+        self,
+        records: Iterable[TelemetryRecord],
+    ) -> IngestionResult:
+        """Ingest a batch of telemetry records.
+
+        The first implementation deliberately reuses the validated
+        single-record ingestion path. This gives RESON a stable batch
+        API without prematurely coupling ingestion to a particular
+        database bulk-insert implementation.
+        """
+        return self.ingest(records)
