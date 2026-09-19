@@ -3,7 +3,9 @@
 from dataclasses import dataclass
 
 from src.common.config import RESONConfig, get_config
+from src.data.storage import Storage
 from src.data.supabase_client import get_supabase_client
+from src.data.supabase_storage import SupabaseStorage
 
 
 @dataclass
@@ -11,7 +13,7 @@ class RESONApplication:
     """Fully configured RESON application."""
 
     config: RESONConfig
-    supabase: object
+    storage: Storage
 
 
 def create_application() -> RESONApplication:
@@ -19,8 +21,9 @@ def create_application() -> RESONApplication:
 
     config = get_config()
     supabase = get_supabase_client()
+    storage = SupabaseStorage(supabase)
 
     return RESONApplication(
         config=config,
-        supabase=supabase,
+        storage=storage,
     )
