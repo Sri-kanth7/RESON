@@ -31,6 +31,16 @@ class SimulationBatch:
     events: list[Event]
     deployments: list[Deployment]
 
+    def records(self) -> list[Metric | Log | Event | Deployment]:
+        """Return all telemetry records in this batch."""
+
+        return [
+            *self.metrics,
+            *self.logs,
+            *self.events,
+            *self.deployments,
+        ]
+
 
 class SystemSimulator:
     """Generate deterministic historical system behavior."""
