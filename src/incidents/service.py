@@ -13,6 +13,16 @@ deviation/change-point streams internally, so the service exposes
 detectors (no Phase 2 code is touched) when only metrics + baselines are at
 hand.
 
+Two outputs exist purely so that Phase 4 can present the pipeline truthfully:
+
+- ``analyze`` preserves every :class:`CorrelationCandidate` the engine
+  evaluated (accepted and rejected alike) on the result, so the per-factor
+  reasoning behind a relationship is available as structured data.
+- :meth:`historical_candidates` can rebuild the ``Signal`` objects behind a
+  persisted historical incident's evidence chain, so the similarity factors
+  that depend on signals are not structurally forced to ``0.0`` by a signal
+  set that was simply never loaded.
+
 No causality is inferred anywhere; wording is limited to "correlated with",
 "temporally associated with", and "supporting evidence".
 """
@@ -25,15 +35,12 @@ from typing import Iterable, Mapping
 from src.data.schemas import Deployment, Event, Log, Metric
 from src.data.storage import Storage
 from src.intelligence.baseline import HistoricalBaseline
-from src.intelligence.change_detection import ChangeDetector
-from src.intelligence.deviation import DeviationDetector
 from src.intelligence.models import (
     BaselineKey,
     BehaviorAnalysis,
     IntelligenceConfig,
     MetricDeviation,
 )
-from src.preprocessing.normalizer import group_metrics
 from src.incidents.correlation import CorrelationEngine, SignalBuilder
 from src.incidents.detector import IncidentDetector
 from src.incidents.lifecycle import IncidentLifecycle
@@ -42,6 +49,12 @@ from src.incidents.models import (
     IncidentIntelligenceConfig,
     IncidentIntelligenceResult,
     IncidentResearch,
+    Signal,
+)
+from src.incidents.reconstruction import (
+    HistoricalSignalContext,
+    HistoricalSignalReconstructor,
+    derive_deviation_evidence,
 )
 from src.incidents.similarity import IncidentMatcher
 from src.incidents.timeline import TimelineBuilder
@@ -69,6 +82,7 @@ class IncidentIntelligenceService:
         self._lifecycle = lifecycle or IncidentLifecycle()
         self._timeline = timeline or TimelineBuilder()
         self._matcher = matcher or IncidentMatcher()
+        self._reconstructor = HistoricalSignalReconstructor()
         self._storage = storage
 
     # ------------------------------------------------------------------
@@ -100,27 +114,20 @@ class IncidentIntelligenceService:
           :func:`~src.preprocessing.normalizer.slice_series` exactly like
           ``BehaviorIntelligenceService.analyze`` (half-open
           ``[window_start, window_end)``) before detection.
-        """
-        config = intelligence_config or IntelligenceConfig()
-        deviation_detector = DeviationDetector(config)
-        series = group_metrics(metrics)
-        if window_start is not None or window_end is not None:
-            from src.preprocessing.normalizer import slice_series
 
-            series = [
-                slice_series(one_series, window_start, window_end)
-                for one_series in series
-            ]
-        deviations = [
-            deviation
-            for one_series in series
-            for deviation in deviation_detector.detect_series(
-                one_series,
-                baselines,
-            )
-        ]
-        change_points = ChangeDetector(config).detect_deviations(deviations)
-        return deviations, change_points
+        The work is delegated to the single shared bridge
+        :func:`~src.incidents.reconstruction.derive_deviation_evidence`, which
+        :class:`~src.incidents.reconstruction.HistoricalSignalReconstructor`
+        also uses, so both paths are guaranteed to window and detect
+        identically.
+        """
+        return derive_deviation_evidence(
+            metrics,
+            baselines,
+            config=intelligence_config,
+            window_start=window_start,
+            window_end=window_end,
+        )
 
     # ------------------------------------------------------------------
     # Main analysis
@@ -208,6 +215,7 @@ class IncidentIntelligenceService:
             changed_services=changed_services,
             researches=researches,
             correlation_evidence=correlation_evidence,
+            correlation_candidates=candidates,
         )
 
     # ------------------------------------------------------------------
@@ -285,8 +293,21 @@ class IncidentIntelligenceService:
         scenario: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
+        signal_context: HistoricalSignalContext | None = None,
     ) -> list[IncidentHistory]:
-        """Load historical incidents plus their timelines from storage."""
+        """Load historical incidents plus their timelines from storage.
+
+        ``signal_context`` supplies the raw telemetry and historical baselines
+        needed to rebuild each incident's supporting signals from its stored
+        evidence chain. Supplying it is what keeps ``metric_similarity``,
+        ``event_sequence_similarity`` and ``deployment_relationship`` from
+        scoring a structural ``0.0`` merely because signals were never
+        reloaded; see :mod:`src.incidents.reconstruction`.
+
+        Without it, ``IncidentHistory.signals`` stays empty and the documented
+        evidence penalty applies unchanged. Either way no signal is invented:
+        signals are admitted only when the stored chain already references them.
+        """
         if self._storage is None:
             return []
 
@@ -301,10 +322,18 @@ class IncidentIntelligenceService:
             evidence = self._storage.get_evidence(
                 source_id=str(incident.id),
             )
+            signals: list[Signal] = []
+            if signal_context is not None:
+                signals = self._reconstructor.reconstruct(
+                    incident,
+                    evidence,
+                    context=signal_context,
+                )
             candidates.append(
                 IncidentHistory(
                     incident=incident,
                     evidence=evidence,
+                    signals=signals,
                 )
             )
         return candidates

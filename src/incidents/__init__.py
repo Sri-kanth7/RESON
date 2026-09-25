@@ -16,6 +16,9 @@ Public surface
 - ``IncidentLifecycle`` — deterministic status transitions.
 - ``TimelineBuilder`` — chronological, stable-ID-ordered timelines.
 - ``IncidentMatcher`` — historical incident similarity and matching.
+- ``HistoricalSignalReconstructor`` / ``HistoricalSignalContext`` /
+  ``derive_deviation_evidence`` — deterministic reconstruction of the signals
+  behind a persisted incident's evidence chain.
 """
 
 from src.incidents.correlation import CorrelationEngine, SignalBuilder
@@ -31,6 +34,11 @@ from src.incidents.models import (
     IncidentSimilarity,
     Signal,
 )
+from src.incidents.reconstruction import (
+    HistoricalSignalContext,
+    HistoricalSignalReconstructor,
+    derive_deviation_evidence,
+)
 from src.incidents.service import IncidentIntelligenceService
 from src.incidents.similarity import IncidentMatcher
 from src.incidents.timeline import TimelineBuilder
@@ -39,6 +47,8 @@ __all__ = [
     "CorrelationCandidate",
     "CorrelationEngine",
     "HistoricalIncidentMatch",
+    "HistoricalSignalContext",
+    "HistoricalSignalReconstructor",
     "IncidentDetector",
     "IncidentHistory",
     "IncidentIntelligenceConfig",
@@ -52,4 +62,5 @@ __all__ = [
     "Signal",
     "SignalBuilder",
     "TimelineBuilder",
+    "derive_deviation_evidence",
 ]

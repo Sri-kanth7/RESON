@@ -242,7 +242,21 @@ class IncidentResearch(IntelligenceModel):
 
 
 class IncidentIntelligenceResult(IntelligenceModel):
-    """Complete output of one Phase 3 analysis run."""
+    """Complete output of one Phase 3 analysis run.
+
+    ``correlation_evidence`` holds the accepted signal-to-signal relationships
+    that were materialized into the ``Evidence`` contract.
+    ``correlation_candidates`` holds *every* pair the engine evaluated, in the
+    engine's deterministic order, including the pairs it rejected and the
+    per-factor values behind each decision. The two lists are aligned by
+    construction: a candidate is a superset of the accepted evidence, so a
+    consumer can explain both "why are these two signals related" and "why are
+    these two signals not related" from the same structured factors, without
+    re-running the engine and without parsing explanation text.
+
+    Exposing candidates changes no calculation, no threshold, no grouping and
+    no identifier; it only preserves output the engine already produced.
+    """
 
     window_start: datetime | None = None
     window_end: datetime | None = None
@@ -250,3 +264,4 @@ class IncidentIntelligenceResult(IntelligenceModel):
     changed_services: list[str] = Field(default_factory=list)
     researches: list[IncidentResearch] = Field(default_factory=list)
     correlation_evidence: list[Evidence] = Field(default_factory=list)
+    correlation_candidates: list[CorrelationCandidate] = Field(default_factory=list)

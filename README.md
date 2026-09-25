@@ -22,6 +22,11 @@ Implemented phases:
   timeline/evidence-chain construction, and historical incident similarity —
   orchestrated through the `IncidentIntelligenceService` (the System Machine
   unit `IncidentResearch`).
+- **Phase 3.1 — Evidence Completeness**: preservation of the structured
+  `CorrelationCandidate` output (including rejected pairs and their per-factor
+  values) and deterministic reconstruction of the `Signal` objects behind a
+  persisted incident's evidence chain, so signal-derived similarity factors are
+  no longer structurally `0.0` merely because signals were never reloaded.
 
 Future phases (LLM-assisted incident analysis, Streamlit UI, etc.) are not yet
 implemented and are not claimed here.
@@ -57,6 +62,7 @@ src/
     timeline.py           TimelineBuilder
     evidence.py           Evidence-chain construction and validation
     similarity.py         IncidentMatcher (historical incident matching)
+    reconstruction.py     Deterministic historical Signal reconstruction
     service.py            IncidentIntelligenceService (pipeline orchestration)
 ```
 
@@ -152,18 +158,68 @@ Pipeline:
 - `analyze(...)` — run correlation, detection, lifecycle, and timeline for one
   window, returning an `IncidentIntelligenceResult` of `IncidentResearch`
   units (the System Machine row: incident, signals, timeline, severity
-  explanation, historical matches).
+  explanation, historical matches). The result also carries
+  `correlation_evidence` (the accepted signal-to-signal relationships) and
+  `correlation_candidates` (every pair the engine evaluated, accepted or
+  rejected, with its per-factor values and explanations). The candidate list is
+  a strict superset of the evidence list, so both "why are these related" and
+  "why are these not related" are answerable from structured factors.
 - `derive_evidence(metrics, baselines, window_start=None, window_end=None, intelligence_config=None)` — bridge that reruns the unmodified
   Phase 2 `DeviationDetector`/`ChangeDetector` to materialize the deviation
   and change-point streams `BehaviorAnalysis` keeps internal. For results
   consistent with a `BehaviorAnalysis`, the same baselines, thresholds
   (`intelligence_config`), and analysis window must be used; metrics are
   windowed with `slice_series` (half-open `[start, end)`) exactly like Phase 2.
+  It delegates to `reconstruction.derive_deviation_evidence`, the single shared
+  implementation of that bridge.
 - `find_historical_matches` / `with_history` — rank and attach historical
   matches to a research unit.
 - `persist(result)` / `historical_candidates(...)` — persist incidents and
   evidence through the `Storage` abstraction only (never Supabase directly);
-  `historical_candidates` reloads incidents plus their timeline evidence.
+  `historical_candidates` reloads incidents plus their timeline evidence. When
+  supplied a `HistoricalSignalContext` (raw telemetry plus the historical
+  baselines), it also reconstructs each incident's `Signal` objects from that
+  stored evidence chain, which is what keeps `metric_similarity`,
+  `event_sequence_similarity` and `deployment_relationship` from scoring a
+  structural `0.0` for evidence that genuinely exists. Reconstruction admits a
+  signal only when the incident's own chain already references it, so nothing
+  is invented, and it is window-independent of any other analysis window.
+
+### Historical Signal Reconstruction
+
+`IncidentMatcher` derives three of its six similarity factors exclusively from
+`IncidentHistory.signals`, and Phase 3 persists incidents and evidence but not
+signals. `HistoricalSignalReconstructor` closes that gap by rebuilding the
+signals from the raw telemetry and baselines that produced them, composing only
+components that already exist: `group_metrics`/`slice_series` for grouping and
+the half-open window, the unmodified Phase 2 `DeviationDetector` and
+`ChangeDetector`, and the unmodified Phase 3 `SignalBuilder`. No Phase 2 or
+Phase 3 algorithm is duplicated or re-implemented.
+
+Two invariants make the result safe and honest:
+
+- **Traceability** — a rebuilt signal is admitted only when an `Evidence` row
+  whose `source_id` is the incident id already points at it, so a signal is
+  never synthesized that the stored evidence does not already reference, and
+  every admitted signal keeps the real `source_record_ids` behind it. The
+  `Incident -> Evidence -> source record` path stays resolvable.
+- **Historical / current separation** — admission is decided by chain
+  membership rather than by the window, so telemetry from another analysis
+  window cannot leak in. A deviation's `source_id` is its `Metric` record id,
+  and a change point's is content-derived, so an identically-derived change
+  point in another window is by construction the same change point.
+
+Because `Incident.end_time` *is* the timestamp of the last supporting signal,
+the incident's inclusive span is expressed as a half-open window by advancing
+the end by one microsecond — the same idiom `BehaviorIntelligenceService` uses
+to keep its final observation inside a half-open window. Without it the final
+signal would be silently dropped and the reconstruction would be quietly
+incomplete.
+
+Signals the context cannot reproduce are omitted rather than approximated, and
+the documented evidence penalty is unchanged: a factor with no evidence on
+either side still scores `0.0` with its full weight. When all six factors are
+genuinely available and identical, `overall_similarity` reaches `1.0`.
 
 Phase 3 does **not** depend on Supabase, Streamlit, network access, an LLM, or
 `get_config()`; it is fully deterministic and offline-testable.
