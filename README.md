@@ -28,8 +28,15 @@ Implemented phases:
   persisted incident's evidence chain, so signal-derived similarity factors are
   no longer structurally `0.0` merely because signals were never reloaded.
 
-Future phases (LLM-assisted incident analysis, Streamlit UI, etc.) are not yet
-implemented and are not claimed here.
+- **Phase 4 — Streamlit Application**: an Obsidian Telemetry-styled local
+  dashboard (`app/`) with four screens — Operations Overview, Incident
+  Investigation, Behavior Analytics, and Historical Incident Explorer — wired
+  to the real Phase 2/3 services. It supports an explicit Supabase production
+  backend and a fully offline `memory` backend, and a user-triggered
+  deterministic demonstration analysis that drives the real ingestion and
+  intelligence pipeline.
+
+LLM-assisted incident analysis is not implemented and is not claimed here.
 
 ## Package Layout
 
@@ -41,6 +48,7 @@ src/
     simulator.py          Scenario timelines (normal, latency_spike, ...)
     supabase_client.py    Supabase client factory
     supabase_storage.py   Bulk storage / retrieval
+    memory_storage.py     In-memory Storage implementation (offline)
     orchestrator.py       Ingestion and retrieval orchestration
   common/
     config.py             Environment-based configuration (.env)
@@ -64,7 +72,29 @@ src/
     similarity.py         IncidentMatcher (historical incident matching)
     reconstruction.py     Deterministic historical Signal reconstruction
     service.py            IncidentIntelligenceService (pipeline orchestration)
+app/
+  streamlit_app.py        Entry point: shell, navigation, backend selection
+  theme.py                Obsidian Telemetry CSS + formatting helpers
+  components/ui.py        Shared presentation components
+  pages/                  Overview, Incidents, Behavior, History renderers
+  services/backend.py     UI-facing adapters over the real src/ services
 ```
+
+## Streamlit Application
+
+The dashboard is a thin presentation layer over the existing services; it
+contains no intelligence of its own.
+
+```powershell
+.\.venv\Scripts\python.exe -m streamlit run app/streamlit_app.py
+```
+
+Select **memory** in the sidebar for fully offline local use (no Supabase
+credentials, no network). Then use **Run Local Demonstration Analysis** to
+generate deterministic simulated telemetry and run the real ingestion and
+intelligence pipeline. Simulated telemetry is always labeled as simulated.
+Supabase remains the production default (`RESON_STORAGE_BACKEND`, default
+`supabase`); the app never falls back silently.
 
 ## Quick Start
 

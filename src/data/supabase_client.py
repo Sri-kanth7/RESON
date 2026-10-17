@@ -13,6 +13,13 @@ def get_supabase_client() -> Client:
 
     config = get_config()
 
+    if config.supabase is None:
+        raise RuntimeError(
+            "Supabase client requested but Supabase is not configured. "
+            "Set SUPABASE_URL and SUPABASE_SECRET_KEY, or select the "
+            "'memory' storage backend for local use."
+        )
+
     return create_client(
         config.supabase.url,
         config.supabase.secret_key,

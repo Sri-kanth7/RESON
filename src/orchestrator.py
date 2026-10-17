@@ -2,8 +2,14 @@
 
 from dataclasses import dataclass
 
-from src.common.config import RESONConfig, get_config
+from src.common.config import (
+    SUPPORTED_STORAGE_BACKENDS,
+    RESONConfig,
+    _load_config,
+    get_config,
+)
 from src.data.ingestion import TelemetryIngestionService
+from src.data.memory_storage import InMemoryStorage
 from src.data.storage import Storage
 from src.data.supabase_client import get_supabase_client
 from src.data.supabase_storage import SupabaseStorage
@@ -18,14 +24,33 @@ class RESONApplication:
     ingestion: TelemetryIngestionService
 
 
-def create_application() -> RESONApplication:
-    """Construct the RESON application and its dependencies."""
+def create_application(storage_backend: str | None = None) -> RESONApplication:
+    """Construct the RESON application and its dependencies.
 
-    config = get_config()
+    ``storage_backend`` explicitly selects the storage implementation:
+    ``"supabase"`` (the default) or ``"memory"`` (local, offline, no
+    credentials or network required). When omitted, the backend comes from
+    the ``RESON_STORAGE_BACKEND`` environment variable, defaulting to
+    ``"supabase"``. Unsupported values raise ``ValueError`` before anything
+    is initialized; nothing ever falls back silently.
+    """
 
-    supabase = get_supabase_client()
+    if storage_backend is None:
+        config = get_config()
+    else:
+        normalized = storage_backend.strip().lower()
+        if normalized not in SUPPORTED_STORAGE_BACKENDS:
+            raise ValueError(
+                f"Unsupported storage backend {storage_backend!r}. "
+                f"Supported backends: {', '.join(SUPPORTED_STORAGE_BACKENDS)}."
+            )
+        config = _load_config(normalized)
 
-    storage = SupabaseStorage(supabase)
+    if config.storage_backend == "memory":
+        storage: Storage = InMemoryStorage()
+    else:
+        supabase = get_supabase_client()
+        storage = SupabaseStorage(supabase)
 
     ingestion = TelemetryIngestionService(storage)
 

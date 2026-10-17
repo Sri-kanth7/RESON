@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head><meta charset="utf-8"/><meta content="width=device-width, initial-scale=1.0" name="viewport"/><meta content="web_dashboard" name="shell-type"/><link href="https://fonts.googleapis.com" rel="preconnect"/><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/><style>@layer base{html,body{margin:0;padding:0;}body{overscroll-behavior:none;}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config={"darkMode":"class","theme":{"extend":{"colors":{"surface-container-lowest":"#070e1d","secondary-fixed":"#e9ddff","surface-container":"#191f2f","tertiary-fixed-dim":"#4edea3","on-tertiary-fixed":"#002113","surface-dim":"#0c1322","on-primary-container":"#00626e","background":"#0c1322","outline-variant":"#3b494c","inverse-surface":"#dce2f7","surface-container-highest":"#2e3545","on-tertiary-container":"#006645","secondary-container":"#571bc1","secondary":"#d0bcff","tertiary-fixed":"#6ffbbe","on-background":"#dce2f7","inverse-on-surface":"#293040","primary-fixed":"#9cf0ff","surface-bright":"#323949","tertiary":"#a8ffd2","secondary-fixed-dim":"#d0bcff","on-surface-variant":"#bac9cc","surface-variant":"#2e3545","on-primary-fixed":"#001f24","primary":"#c3f5ff","surface-container-low":"#141b2b","on-secondary-container":"#c4abff","on-secondary-fixed":"#23005c","on-secondary-fixed-variant":"#5516be","on-tertiary-fixed-variant":"#005236","inverse-primary":"#006875","tertiary-container":"#5be9ad","error-container":"#93000a","outline":"#849396","error":"#ffb4ab","surface-tint":"#00daf3","primary-fixed-dim":"#00daf3","surface-container-high":"#232a3a","primary-container":"#00e5ff","on-tertiary":"#003824","on-error-container":"#ffdad6","on-secondary":"#3c0091","surface":"#0c1322","on-primary":"#00363d","on-error":"#690005","on-surface":"#dce2f7","on-primary-fixed-variant":"#004f58"},"borderRadius":{"DEFAULT":"0.125rem","lg":"0.25rem","xl":"0.5rem","full":"0.75rem"},"spacing":{"space-md":"0.75rem","space-sm":"0.5rem","margin-lg":"2rem","gutter-lg":"1.5rem","space-xs":"0.25rem","margin-sm":"1rem","gutter":"1rem","margin":"1.5rem","gutter-sm":"0.75rem","space-lg":"1rem","space-xl":"1.5rem"},"fontFamily":{"headline-md":["Inter"],"body-lg":["Inter"],"label-lg":["JetBrains Mono"],"body-md":["Inter"],"body-sm":["Inter"],"headline-lg":["Inter"],"headline-xl":["Inter"],"headline-sm":["Inter"],"label-sm":["JetBrains Mono"],"headline-xl-mobile":["Inter"],"label-md":["JetBrains Mono"]},"fontSize":{"headline-md":["1.25rem",{"lineHeight":"1.75rem","letterSpacing":"-0.015em","fontWeight":"600"}],"body-lg":["1rem",{"lineHeight":"1.5rem","fontWeight":"400"}],"label-lg":["0.875rem",{"lineHeight":"1.25rem","letterSpacing":"-0.01em","fontWeight":"500"}],"body-md":["0.875rem",{"lineHeight":"1.375rem","fontWeight":"400"}],"body-sm":["0.75rem",{"lineHeight":"1.125rem","fontWeight":"400"}],"headline-lg":["1.5rem",{"lineHeight":"2rem","letterSpacing":"-0.02em","fontWeight":"600"}],"headline-xl":["2.25rem",{"lineHeight":"2.75rem","letterSpacing":"-0.025em","fontWeight":"700"}],"headline-sm":["1rem",{"lineHeight":"1.5rem","letterSpacing":"-0.01em","fontWeight":"600"}],"label-sm":["0.6875rem",{"lineHeight":"0.875rem","letterSpacing":"0.02em","fontWeight":"400"}],"headline-xl-mobile":["1.75rem",{"lineHeight":"2.25rem","letterSpacing":"-0.02em","fontWeight":"700"}],"label-md":["0.75rem",{"lineHeight":"1rem","letterSpacing":"0em","fontWeight":"500"}]}}}}</script></head><body class="bg-background font-body-md text-on-surface antialiased min-h-screen selection:bg-primary-container selection:text-on-primary-container"><aside class="fixed left-0 top-0 h-full w-[260px] bg-surface-container-lowest z-50 flex flex-col justify-between shadow-[0_1px_8px_rgba(0,0,0,0.4)]"><div class="flex flex-col"><div class="h-16 px-gutter flex items-center gap-space-sm bg-surface-container-lowest/80 backdrop-blur-xl"><img alt="RESON Telemetry Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1X0-mjE2iA1sCcsb0p5KaHAuszLbgLX-Uj421S6DnM7eUN0VY38UpclOEfC2aLZh_C8J9TMEamzf3OKEr4v46C4Iq9i6oEA3tUb4bmfFaa-qA7MizsTFmilQABkidUlzwDDImRVCczBjQUM1B5Yt4J9i3OEpLBIsbm-EMR1irQ-VhUjjqZtl_6kbcYgn6YBHGCdmY6uJf4r_ErsWJ7jLS7vvSMXL_bY0-cShkOTtRb16Wwi463FohZ7yHw"/><div class="flex flex-col"><span class="font-headline-sm text-headline-sm font-bold tracking-tight text-on-surface uppercase">RESON</span><span class="font-label-sm text-label-sm text-outline tracking-wider uppercase">Core Intelligence</span></div></div><div class="px-gutter pt-space-sm pb-space-md"><div class="flex items-center gap-space-xs px-space-sm py-space-xs rounded bg-surface-container-low"><span class="w-2 h-2 rounded-full bg-tertiary-fixed-dim animate-pulse"></span><span class="font-label-sm text-label-sm text-on-surface-variant tracking-tight">CLUSTER: prod-us-east-1 • LIVE</span></div></div><nav class="flex flex-col gap-space-xs px-space-sm pt-space-xs" data-active-classes="bg-surface-container-high text-primary font-bold"><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" data-path="overview" href="#"><span class="material-symbols-outlined text-[18px]">grid_view</span><span class="font-label-md text-label-md">Overview</span></a><a aria-current="page" class="flex items-center justify-between px-space-md py-space-sm rounded transition-colors bg-surface-container-high text-primary font-bold" data-path="incidents" href="#"><div class="flex items-center gap-space-sm"><span class="material-symbols-outlined text-[18px]">emergency_home</span><span class="font-label-md text-label-md">Incidents</span></div><span class="px-space-xs py-0.5 rounded font-label-sm text-label-sm bg-error-container text-on-error-container">2 ACTIVE</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" data-path="behavior-analytics" href="#"><span class="material-symbols-outlined text-[18px]">insights</span><span class="font-label-md text-label-md">Behavior Analytics</span></a><a class="flex items-center gap-space-sm px-space-md py-space-sm rounded text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors" data-path="historical-explorer" href="#"><span class="material-symbols-outlined text-[18px]">manage_search</span><span class="font-label-md text-label-md">Historical Explorer</span></a></nav></div><div class="p-gutter bg-surface-container-low flex flex-col gap-space-xs"><div class="flex items-center justify-between text-outline"><span class="font-label-sm text-label-sm">Ingestion Latency</span><span class="font-label-sm text-label-sm text-tertiary font-bold">42ms</span></div><div class="flex items-center justify-between text-outline"><span class="font-label-sm text-label-sm">Signal Engine</span><span class="font-label-sm text-label-sm text-on-surface-variant">14.8k sig/s</span></div><div class="pt-space-xs"><span class="font-label-sm text-label-sm text-outline block truncate">v2.4.0-core (Streamlit PyBridge)</span></div></div></aside><div class="pl-[260px]"><header class="fixed top-0 left-[260px] right-0 h-16 bg-surface-container-lowest/90 backdrop-blur-xl z-40 px-gutter-lg flex items-center justify-between shadow-[0_1px_8px_rgba(0,0,0,0.3)]"><div class="flex items-center gap-space-md"><img alt="RESON Telemetry Logo" class="h-8 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AEtjO1X0-mjE2iA1sCcsb0p5KaHAuszLbgLX-Uj421S6DnM7eUN0VY38UpclOEfC2aLZh_C8J9TMEamzf3OKEr4v46C4Iq9i6oEA3tUb4bmfFaa-qA7MizsTFmilQABkidUlzwDDImRVCczBjQUM1B5Yt4J9i3OEpLBIsbm-EMR1irQ-VhUjjqZtl_6kbcYgn6YBHGCdmY6uJf4r_ErsWJ7jLS7vvSMXL_bY0-cShkOTtRb16Wwi463FohZ7yHw"/><div class="flex items-center gap-space-xs px-space-sm py-space-xs bg-surface-container rounded text-on-surface"><span class="material-symbols-outlined text-[16px] text-outline">cloud_done</span><span class="font-label-md text-label-md">production-primary-us-east</span><span class="material-symbols-outlined text-[16px] text-outline">expand_more</span></div><div class="flex items-center bg-surface-container-low rounded p-space-xs gap-space-xs"><div class="flex items-center gap-space-xs px-space-sm py-space-xs rounded bg-surface-container-high text-on-surface font-label-sm text-label-sm cursor-pointer"><span>Last 6 Hours</span><span class="material-symbols-outlined text-[14px]">arrow_drop_down</span></div><div class="flex items-center gap-1 font-label-sm text-label-sm text-on-surface-variant px-space-xs"><button class="px-space-xs py-0.5 rounded hover:bg-surface-container hover:text-on-surface" type="button">1h</button><span class="text-outline-variant">|</span><button class="px-space-xs py-0.5 rounded bg-surface-container text-primary font-bold" type="button">6h</button><span class="text-outline-variant">|</span><button class="px-space-xs py-0.5 rounded hover:bg-surface-container hover:text-on-surface" type="button">24h</button><span class="text-outline-variant">|</span><button class="px-space-xs py-0.5 rounded hover:bg-surface-container hover:text-on-surface" type="button">7d</button></div></div><div class="flex items-center gap-space-xs text-tertiary-fixed-dim bg-surface-container-low px-space-sm py-space-xs rounded"><span class="material-symbols-outlined text-[16px]">check_circle</span><span class="font-label-sm text-label-sm">Telemetry Sources: 28/28 OK</span></div></div><div class="flex items-center gap-space-md"><button class="flex items-center gap-space-xs px-space-md py-space-sm bg-surface-container-high hover:bg-surface-bright text-primary rounded font-label-md text-label-md transition-all shadow-[0_0_0_1px_rgba(0,229,255,0.35)]" type="button"><span class="material-symbols-outlined text-[16px] text-primary-container">fingerprint</span><span>Run Fingerprint Correlation</span></button><div class="relative flex items-center justify-center w-8 h-8 rounded bg-surface-container-high text-on-surface-variant hover:text-on-surface cursor-pointer"><span class="material-symbols-outlined text-[18px]">notifications</span><span class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-error"></span></div><div class="flex items-center gap-space-sm"><div class="flex flex-col text-right"><span class="font-label-sm text-label-sm text-on-surface">SRE On-Call</span><span class="font-label-sm text-label-sm text-outline">Triage Lead</span></div><div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center"><span class="material-symbols-outlined text-on-primary text-[18px]">person</span></div></div></div></header><main class="relative pt-16 w-full min-h-screen bg-background"><div class="flex flex-col w-full">
+<!-- Interactive Canvas & Notification Anchor -->
+<div class="px-margin-lg py-margin flex flex-col gap-space-xl max-w-[1720px] mx-auto w-full">
+<!-- 1. Header & Incident State Banner -->
+<header class="flex flex-col gap-space-md bg-surface-container-low p-space-lg rounded shadow-sm relative overflow-hidden">
+<!-- Ambient Diagnostic Glow -->
+<div class="absolute -right-24 -top-24 w-96 h-96 bg-error/5 rounded-full blur-3xl pointer-events-none"></div>
+<!-- Top Meta Track: Breadcrumbs & Telemetry Engine Status -->
+<div class="flex items-center justify-between">
+<nav aria-label="Breadcrumbs" class="flex items-center gap-space-xs font-label-sm text-label-sm">
+<a class="text-outline hover:text-on-surface transition-colors" href="#">Incidents</a>
+<span class="text-outline-variant">/</span>
+<span class="text-primary font-bold">INC-8492</span>
+<span class="text-outline-variant">/</span>
+<span class="text-on-surface-variant">Deep Evidence Investigation</span>
+</nav>
+<div class="flex items-center gap-space-sm font-label-sm text-label-sm">
+<span class="flex items-center gap-space-xs text-outline">
+<span class="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+            SYNCHRONIZED WITH STREAMLIT PYBRIDGE ENGINE
+          </span>
+<span class="text-outline-variant">•</span>
+<span class="text-on-surface-variant">Trace Vector: <code class="text-primary-fixed">#tv-8492-db-jvm-kfk</code></span>
+</div>
+</div>
+<!-- Incident Title & Fast Telemetry Flags -->
+<div class="flex flex-col xl:flex-row xl:items-center justify-between gap-space-md">
+<div class="flex flex-col gap-space-xs min-w-0">
+<div class="flex items-center gap-space-sm flex-wrap">
+<span class="px-space-xs py-0.5 rounded font-label-sm text-label-sm bg-error-container text-on-error-container font-bold tracking-wider">
+              CRITICAL P1
+            </span>
+<span class="px-space-xs py-0.5 rounded font-label-sm text-label-sm bg-surface-container-high text-primary font-bold">
+              STATUS: INVESTIGATING
+            </span>
+<span class="px-space-xs py-0.5 rounded font-label-sm text-label-sm bg-surface-container text-on-surface-variant">
+              IMPACT: <span class="text-on-surface font-semibold">checkout-v2</span>
+</span>
+<span class="px-space-xs py-0.5 rounded font-label-sm text-label-sm bg-surface-container text-on-surface-variant">
+              DETECTED: <span class="text-on-surface font-semibold">14:23:10 UTC</span>
+</span>
+<span class="px-space-xs py-0.5 rounded font-label-sm text-label-sm bg-surface-container text-on-surface-variant flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px] text-error">timer</span>
+              DURATION: <span class="text-error font-bold" id="live-timer">34m 12s</span>
+</span>
+</div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate pt-space-xs">
+            INC-8492: Order Pipeline Threadpool Saturation &amp; Upstream DB Connection Exhaustion
+          </h1>
+</div>
+<!-- Action Controls -->
+<div class="flex items-center gap-space-sm flex-shrink-0">
+<button class="flex items-center gap-space-xs px-space-md py-space-xs bg-surface-container-high hover:bg-surface-bright text-on-surface rounded font-label-md text-label-md transition-all" type="button">
+<span class="material-symbols-outlined text-[16px] text-outline">description</span>
+<span>Export Postmortem MD</span>
+</button>
+<button class="flex items-center gap-space-xs px-space-md py-space-xs bg-surface-container-high hover:bg-surface-bright text-primary rounded font-label-md text-label-md transition-all shadow-[0_0_0_1px_rgba(0,229,255,0.25)]" type="button">
+<span class="material-symbols-outlined text-[16px] text-primary-container">history</span>
+<span>Historical Similarity</span>
+</button>
+<button class="flex items-center gap-space-xs px-space-md py-space-xs bg-error-container hover:bg-error/30 text-on-error-container rounded font-label-md text-label-md transition-all font-semibold" type="button">
+<span class="material-symbols-outlined text-[16px]">restart_alt</span>
+<span>Mitigate / Rollback</span>
+</button>
+</div>
+</div>
+</header>
+<!-- 2. Executive Explainability Summary (The "Why" Card) -->
+<section class="relative bg-surface-container p-space-lg rounded shadow-md overflow-hidden">
+<!-- Cyan Precision Accent Indicator -->
+<div class="absolute left-0 top-0 bottom-0 w-1.5 bg-primary-container shadow-[0_0_12px_rgba(0,229,255,0.6)]"></div>
+<div class="pl-space-sm flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary-container text-[20px]">psychology_alt</span>
+<span class="font-label-md text-label-md uppercase tracking-wider text-primary font-bold">RESON Automated Synthesis &amp; Explainability Vector</span>
+</div>
+<div class="flex items-center gap-space-md">
+<div class="flex items-center gap-space-xs bg-surface-container-lowest px-space-sm py-0.5 rounded font-label-sm text-label-sm">
+<span class="text-outline">Confidence:</span>
+<span class="text-tertiary-fixed-dim font-bold">94.2%</span>
+<span class="text-outline-variant">(14 corroborating signals, 0 conflicting)</span>
+</div>
+<div class="flex items-center gap-space-xs bg-surface-container-lowest px-space-sm py-0.5 rounded font-label-sm text-label-sm">
+<span class="text-outline">Entropy Shift:</span>
+<span class="text-error font-bold">+4.8σ deviation</span>
+</div>
+</div>
+</div>
+<!-- The Diagnostic Callout Body -->
+<p class="font-body-lg text-body-lg text-on-surface leading-relaxed max-w-[1580px]">
+<strong class="text-primary font-semibold">RESON Diagnosis:</strong> Abnormal memory allocation velocity in <code class="text-primary-fixed bg-surface-container-lowest px-1 rounded">checkout-v2</code> triggered stop-the-world JVM GC pauses (max <span class="text-error font-semibold">2,420ms</span>), inducing cascading timeout drops in gRPC client pool and resulting in Kafka consumer group unbalance across <strong class="text-on-surface font-semibold">12 partitions</strong>. Baseline deviation is <strong class="text-error font-semibold">4.8σ</strong> above the trailing 30-day historical window.
+        </p>
+<!-- Traceability & Causal Guarantee Ledger -->
+<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm pt-space-xs font-label-sm text-label-sm text-on-surface-variant bg-surface-container-low/70 p-space-sm rounded">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-[16px] text-tertiary">verified</span>
+<span>Traceability ledger: Mutual entropy alignment locked across window <code class="text-primary">14:21:00–14:26:30 UTC</code>. Root cause validated against OS lock-contention flamegraphs.</span>
+</div>
+<div class="flex items-center gap-space-md self-end sm:self-auto font-label-sm text-label-sm">
+<span class="text-outline">Kernel Epoch: <span class="text-on-surface">1718029510.412</span></span>
+<span class="text-outline">Corroborated Leases: <span class="text-on-surface">428 threads</span></span>
+</div>
+</div>
+</div>
+</section>
+<!-- 3. Distinctive Evidence-Chain Visualization (Core Differentiator Node-Flow) -->
+<section class="flex flex-col gap-space-sm bg-surface-container-low p-space-lg rounded shadow-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-sm">
+<span class="material-symbols-outlined text-primary text-[18px]">account_tree</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface font-bold uppercase tracking-tight">Causal Evidence Propagation Graph</h2>
+<span class="text-label-sm font-label-sm text-outline px-space-xs py-0.5 bg-surface-container rounded">Directed Acyclic Graph • 5 Confirmed Vertices</span>
+</div>
+<div class="flex items-center gap-space-sm font-label-sm text-label-sm">
+<span class="flex items-center gap-1 text-on-surface-variant"><span class="w-2 h-2 rounded-full bg-error"></span> Root Contention</span>
+<span class="flex items-center gap-1 text-on-surface-variant"><span class="w-2 h-2 rounded-full bg-secondary"></span> Intermediate Cascade</span>
+<span class="flex items-center gap-1 text-on-surface-variant"><span class="w-2 h-2 rounded-full bg-primary-container"></span> Public Ingress Failure</span>
+</div>
+</div>
+<!-- Node Graph Flow Container -->
+<div class="w-full overflow-x-auto pb-space-sm pt-space-xs">
+<div class="flex items-stretch min-w-[1240px] gap-0 relative">
+<!-- Node 1 -->
+<div class="flex-1 flex flex-col bg-surface-container p-space-md rounded relative transition-all hover:bg-surface-bright group shadow-sm">
+<div class="flex items-center justify-between font-label-sm text-label-sm mb-space-xs">
+<span class="text-outline">14:21:04 UTC</span>
+<span class="px-1.5 py-0.5 rounded bg-error/15 text-error font-bold">+280%</span>
+</div>
+<div class="font-label-md text-label-md text-on-surface font-bold mb-1 group-hover:text-primary transition-colors">
+              DB Pool Exhaustion
+            </div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-snug mb-space-sm">
+              HikariCP max leases hit limit (100/100). Acquire latency spiked to 1.84s on orders_master.
+            </p>
+<div class="mt-auto pt-space-xs flex items-center justify-between font-label-sm text-label-sm text-outline">
+<span>db.pool.wait</span>
+<span class="text-on-surface">postgres-pool-primary</span>
+</div>
+</div>
+<!-- Connector 1 -->
+<div class="w-8 flex items-center justify-center flex-shrink-0 text-outline-variant">
+<span class="material-symbols-outlined text-[20px] text-primary/60">arrow_forward</span>
+</div>
+<!-- Node 2 -->
+<div class="flex-1 flex flex-col bg-surface-container p-space-md rounded relative transition-all hover:bg-surface-bright group shadow-sm">
+<div class="flex items-center justify-between font-label-sm text-label-sm mb-space-xs">
+<span class="text-outline">14:21:48 UTC</span>
+<span class="px-1.5 py-0.5 rounded bg-error/15 text-error font-bold">+184%</span>
+</div>
+<div class="font-label-md text-label-md text-on-surface font-bold mb-1 group-hover:text-primary transition-colors">
+              JVM Heap Saturation
+            </div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-snug mb-space-sm">
+              Allocated byte-rate jumped to 3.4GB/s holding stranded request contexts. Eden 98% full.
+            </p>
+<div class="mt-auto pt-space-xs flex items-center justify-between font-label-sm text-label-sm text-outline">
+<span>jvm.gc.eden_used</span>
+<span class="text-on-surface">checkout-v2-worker-9</span>
+</div>
+</div>
+<!-- Connector 2 -->
+<div class="w-8 flex items-center justify-center flex-shrink-0 text-outline-variant">
+<span class="material-symbols-outlined text-[20px] text-primary/60">arrow_forward</span>
+</div>
+<!-- Node 3 (Selected Causal Root Pivot) -->
+<div class="flex-1 flex flex-col bg-surface-container-high p-space-md rounded relative transition-all shadow-[0_0_0_1px_rgba(0,229,255,0.4)] group">
+<div class="absolute -top-2.5 right-2 px-1.5 py-0.2 bg-primary-container text-on-primary-container font-label-sm text-label-sm font-bold rounded">
+              ROOT DRIVER
+            </div>
+<div class="flex items-center justify-between font-label-sm text-label-sm mb-space-xs">
+<span class="text-primary font-bold">14:22:20 UTC</span>
+<span class="px-1.5 py-0.5 rounded bg-error/15 text-error font-bold">+520%</span>
+</div>
+<div class="font-label-md text-label-md text-primary font-bold mb-1">
+              STW Garbage Collection Freeze
+            </div>
+<p class="font-body-sm text-body-sm text-on-surface leading-snug mb-space-sm">
+              G1GC Major Evacuation Pause halted thread execution for 2,420ms consecutively.
+            </p>
+<div class="mt-auto pt-space-xs flex items-center justify-between font-label-sm text-label-sm text-primary-fixed">
+<span>jvm.gc.pause_dur</span>
+<span class="font-bold">OpenJDK HotSpot</span>
+</div>
+</div>
+<!-- Connector 3 -->
+<div class="w-8 flex items-center justify-center flex-shrink-0 text-outline-variant">
+<span class="material-symbols-outlined text-[20px] text-primary/60">arrow_forward</span>
+</div>
+<!-- Node 4 -->
+<div class="flex-1 flex flex-col bg-surface-container p-space-md rounded relative transition-all hover:bg-surface-bright group shadow-sm">
+<div class="flex items-center justify-between font-label-sm text-label-sm mb-space-xs">
+<span class="text-outline">14:22:52 UTC</span>
+<span class="px-1.5 py-0.5 rounded bg-error/15 text-error font-bold">100% TIMEOUT</span>
+</div>
+<div class="font-label-md text-label-md text-on-surface font-bold mb-1 group-hover:text-primary transition-colors">
+              Thread Starvation &amp; Drop
+            </div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-snug mb-space-sm">
+              Tomcat/gRPC worker threadpools reached 512/512 active. Keep-alive leases timed out.
+            </p>
+<div class="mt-auto pt-space-xs flex items-center justify-between font-label-sm text-label-sm text-outline">
+<span>grpc.threads.active</span>
+<span class="text-on-surface">checkout-ingress</span>
+</div>
+</div>
+<!-- Connector 4 -->
+<div class="w-8 flex items-center justify-center flex-shrink-0 text-outline-variant">
+<span class="material-symbols-outlined text-[20px] text-primary/60">arrow_forward</span>
+</div>
+<!-- Node 5 -->
+<div class="flex-1 flex flex-col bg-surface-container p-space-md rounded relative transition-all hover:bg-surface-bright group shadow-sm">
+<div class="flex items-center justify-between font-label-sm text-label-sm mb-space-xs">
+<span class="text-outline">14:23:10 UTC</span>
+<span class="px-1.5 py-0.5 rounded bg-error-container text-on-error-container font-bold">INCIDENT TRIP</span>
+</div>
+<div class="font-label-md text-label-md text-error font-bold mb-1 group-hover:text-primary transition-colors">
+              Kafka Partition Rebalance
+            </div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-snug mb-space-sm">
+              Coordinator dropped 12 partitions due to missing heartbeat responses. Lag accumulated 142k.
+            </p>
+<div class="mt-auto pt-space-xs flex items-center justify-between font-label-sm text-label-sm text-outline">
+<span>kafka.consumer.lag</span>
+<span class="text-on-surface">kafka-cluster-prod</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- 4. Two-Column Detailed Analytics Grid (7:5 Split) -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-gutter-lg items-start">
+<!-- LEFT COLUMN: Telemetry Signal Correlation Timeline (7 Cols) -->
+<section class="lg:col-span-7 flex flex-col gap-space-md bg-surface-container-low p-space-lg rounded shadow-sm">
+<div class="flex items-center justify-between">
+<div class="flex flex-col">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-primary text-[18px]">waterfall_chart</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface font-bold">Synchronized Telemetry Multi-Track</h2>
+</div>
+<span class="font-label-sm text-label-sm text-outline">Temporal Co-Registration Window: 14:15:00 — 14:35:00 UTC</span>
+</div>
+<!-- Micro Scrub Controls -->
+<div class="flex items-center gap-space-xs bg-surface-container px-space-sm py-1 rounded font-label-sm text-label-sm">
+<span class="text-outline">Scrub:</span>
+<button class="px-1.5 py-0.5 bg-surface-container-high hover:bg-surface-bright rounded text-on-surface" type="button">t - 10m</button>
+<button class="px-1.5 py-0.5 bg-primary-container text-on-primary-container font-bold rounded" type="button">t = 0 (Anomaly)</button>
+<button class="px-1.5 py-0.5 bg-surface-container-high hover:bg-surface-bright rounded text-on-surface" type="button">t + 10m</button>
+</div>
+</div>
+<!-- Co-aligned Time-axis Container with Continuous Inception Marker -->
+<div class="relative flex flex-col gap-space-sm bg-surface-container-lowest p-space-md rounded">
+<!-- Shared t=0 Inception Line Overlay across all tracks -->
+<div class="absolute top-0 bottom-0 left-[54%] w-0.5 bg-error z-20 pointer-events-none flex flex-col items-center">
+<div class="bg-error text-background font-label-sm text-label-sm px-1 rounded -translate-y-2 whitespace-nowrap font-bold shadow-sm">
+              Inception: 14:23:10
+            </div>
+<div class="w-full h-full bg-error/20"></div>
+</div>
+<!-- Track 1: checkout-v2 gRPC p99 Latency -->
+<div class="flex flex-col gap-1 p-space-xs rounded bg-surface-container-low/50 relative">
+<div class="flex items-center justify-between font-label-sm text-label-sm">
+<span class="text-on-surface font-semibold flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-primary-container"></span>
+                checkout-v2: gRPC p99 Latency
+              </span>
+<div class="flex items-center gap-space-sm">
+<span class="text-outline">Normal: 45ms</span>
+<span class="text-error font-bold">Max: 4,820ms</span>
+</div>
+</div>
+<!-- SVG Sparkline Multi-node Chart -->
+<div class="w-full h-14 relative">
+<svg class="w-full h-full overflow-visible" preserveaspectratio="none" viewbox="0 0 500 56">
+<!-- Baseline threshold fill -->
+<rect fill="rgba(195, 245, 255, 0.05)" height="18" width="500" x="0" y="38"></rect>
+<path d="M 0,42 L 60,41 L 120,43 L 180,41 L 240,42 L 265,39 L 270,12 L 275,6 L 310,8 L 360,10 L 420,14 L 500,16" fill="none" stroke="#00e5ff" stroke-linecap="round" stroke-width="2.5"></path>
+<!-- Area gradient -->
+<path d="M 0,42 L 60,41 L 120,43 L 180,41 L 240,42 L 265,39 L 270,12 L 275,6 L 310,8 L 360,10 L 420,14 L 500,16 L 500,56 L 0,56 Z" fill="rgba(0, 229, 255, 0.12)"></path>
+<circle cx="270" cy="12" fill="#ffb4ab" r="3"></circle>
+</svg>
+</div>
+</div>
+<!-- Track 2: Postgres Connection Pool Active Leases -->
+<div class="flex flex-col gap-1 p-space-xs rounded bg-surface-container-low/50 relative">
+<div class="flex items-center justify-between font-label-sm text-label-sm">
+<span class="text-on-surface font-semibold flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-error"></span>
+                Postgres Pool Active Leases (%)
+              </span>
+<div class="flex items-center gap-space-sm">
+<span class="text-outline">Normal: 32%</span>
+<span class="text-error font-bold">100% SATURATED (100/100)</span>
+</div>
+</div>
+<div class="w-full h-14 relative">
+<svg class="w-full h-full overflow-visible" preserveaspectratio="none" viewbox="0 0 500 56">
+<path d="M 0,45 L 80,43 L 160,44 L 230,35 L 255,18 L 260,4 L 320,4 L 380,4 L 440,4 L 500,4" fill="none" stroke="#ffb4ab" stroke-linecap="round" stroke-width="2.5"></path>
+<path d="M 0,45 L 80,43 L 160,44 L 230,35 L 255,18 L 260,4 L 320,4 L 380,4 L 440,4 L 500,4 L 500,56 L 0,56 Z" fill="rgba(255, 180, 171, 0.12)"></path>
+<!-- Pool threshold line -->
+<line stroke="#ffb4ab" stroke-dasharray="3 3" stroke-width="1" x1="0" x2="500" y1="4" y2="4"></line>
+</svg>
+</div>
+</div>
+<!-- Track 3: JVM Garbage Collection Pause Durations -->
+<div class="flex flex-col gap-1 p-space-xs rounded bg-surface-container-low/50 relative">
+<div class="flex items-center justify-between font-label-sm text-label-sm">
+<span class="text-on-surface font-semibold flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-secondary-fixed"></span>
+                JVM GC Pause Duration (ms)
+              </span>
+<div class="flex items-center gap-space-sm">
+<span class="text-outline">Baseline: 18ms</span>
+<span class="text-secondary font-bold">Peak: 2,420ms (STW)</span>
+</div>
+</div>
+<div class="w-full h-14 relative">
+<svg class="w-full h-full overflow-visible" preserveaspectratio="none" viewbox="0 0 500 56">
+<!-- Bar spikes representation for discrete GC cycles -->
+<rect fill="#849396" height="6" width="3" x="30" y="50"></rect>
+<rect fill="#849396" height="7" width="3" x="80" y="49"></rect>
+<rect fill="#849396" height="6" width="3" x="140" y="50"></rect>
+<rect fill="#849396" height="10" width="3" x="210" y="46"></rect>
+<rect fill="#d0bcff" height="24" width="4" x="250" y="32"></rect>
+<rect fill="#ffb4ab" height="52" width="5" x="268" y="4"></rect>
+<rect fill="#d0bcff" height="48" width="5" x="290" y="8"></rect>
+<rect fill="#d0bcff" height="40" width="4" x="330" y="16"></rect>
+<rect fill="#d0bcff" height="34" width="4" x="380" y="22"></rect>
+<rect fill="#849396" height="28" width="4" x="440" y="28"></rect>
+</svg>
+</div>
+</div>
+<!-- Track 4: Kafka Consumer Group Partition Lag -->
+<div class="flex flex-col gap-1 p-space-xs rounded bg-surface-container-low/50 relative">
+<div class="flex items-center justify-between font-label-sm text-label-sm">
+<span class="text-on-surface font-semibold flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-tertiary-fixed-dim"></span>
+                Kafka Consumer Group Lag (records)
+              </span>
+<div class="flex items-center gap-space-sm">
+<span class="text-outline">Steady: &lt;150 rec</span>
+<span class="text-tertiary font-bold">142,480 Uncommitted</span>
+</div>
+</div>
+<div class="w-full h-14 relative">
+<svg class="w-full h-full overflow-visible" preserveaspectratio="none" viewbox="0 0 500 56">
+<path d="M 0,52 L 180,51 L 260,50 L 272,38 L 300,24 L 350,14 L 420,8 L 500,4" fill="none" stroke="#4edea3" stroke-linecap="round" stroke-width="2.5"></path>
+<path d="M 0,52 L 180,51 L 260,50 L 272,38 L 300,24 L 350,14 L 420,8 L 500,4 L 500,56 L 0,56 Z" fill="rgba(78, 222, 163, 0.12)"></path>
+</svg>
+</div>
+</div>
+<!-- Shared Time Axis Labels -->
+<div class="flex justify-between font-label-sm text-label-sm text-outline pt-space-xs px-2">
+<span>14:15:00 UTC</span>
+<span>14:18:00</span>
+<span>14:21:00</span>
+<span class="text-error font-bold">14:23:10 (t=0)</span>
+<span>14:27:00</span>
+<span>14:31:00</span>
+<span>14:35:00 UTC</span>
+</div>
+</div>
+<!-- Telemetry Log Drilldown Drawer Inline Preview -->
+<div class="bg-surface-container p-space-md rounded flex flex-col gap-space-xs">
+<div class="flex items-center justify-between">
+<span class="font-label-md text-label-md text-on-surface font-bold flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[16px] text-tertiary">terminal</span>
+              Tail Log Correlator: [checkout-v2-worker-9]
+            </span>
+<span class="font-label-sm text-label-sm text-outline">Streaming stdout+stderr</span>
+</div>
+<div class="bg-surface-container-lowest p-space-sm rounded font-label-sm text-label-sm text-on-surface-variant flex flex-col gap-1 overflow-x-auto">
+<div class="text-outline-variant">14:23:08.412 [HikariPool-1] WARN com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Connection is not available, request timed out after 1801ms.</div>
+<div class="text-error">14:23:09.110 [G1-Worker-2] ERROR org.openjdk.hotspot.gc - Pause Full (System.gc()) 2420.4ms: Eden: 1024.0M(1024.0M)-&gt;0.0B(1024.0M)</div>
+<div class="text-on-surface">14:23:10.004 [kafka-coordinator-heartbeat] WARN o.a.k.c.c.i.AbstractCoordinator - [Consumer clientId=chkt-09] Heartbeat thread dead for 2400ms. Disconnecting.</div>
+</div>
+</div>
+</section>
+<!-- RIGHT COLUMN: Correlated Signals Matrix & Historical Matches (5 Cols) -->
+<section class="lg:col-span-5 flex flex-col gap-space-lg">
+<!-- A: Correlated Signals Panel -->
+<div class="bg-surface-container-low p-space-lg rounded shadow-sm flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-primary text-[18px]">hub</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface font-bold">Signal Correlation Matrix</h2>
+</div>
+<span class="font-label-sm text-label-sm text-outline">Pearson + Mutual Info</span>
+</div>
+<!-- Signal Rows -->
+<div class="flex flex-col gap-space-xs">
+<!-- Signal 1 -->
+<div class="p-space-sm bg-surface-container rounded flex items-center justify-between transition-colors hover:bg-surface-container-high">
+<div class="flex flex-col min-w-0 pr-space-sm">
+<span class="font-label-md text-label-md text-on-surface font-bold truncate">db.pool.wait_duration</span>
+<span class="font-label-sm text-label-sm text-outline truncate">Postgres Client Pool Timeout Vector</span>
+</div>
+<div class="flex items-center gap-space-sm flex-shrink-0 text-right">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-primary font-bold">r = 0.98</span>
+<span class="font-label-sm text-label-sm text-tertiary">ΔH +4.2</span>
+</div>
+<div class="w-12 h-6 flex items-center justify-center">
+<!-- Micro trend line -->
+<svg class="w-full h-full" viewbox="0 0 40 16">
+<path d="M2,14 L12,12 L20,10 L30,4 L38,2" fill="none" stroke="#00e5ff" stroke-width="2"></path>
+</svg>
+</div>
+</div>
+</div>
+<!-- Signal 2 -->
+<div class="p-space-sm bg-surface-container rounded flex items-center justify-between transition-colors hover:bg-surface-container-high">
+<div class="flex flex-col min-w-0 pr-space-sm">
+<span class="font-label-md text-label-md text-on-surface font-bold truncate">jvm.gc.concurrent_phase_time</span>
+<span class="font-label-sm text-label-sm text-outline truncate">G1 Old Generation Sweeper Latency</span>
+</div>
+<div class="flex items-center gap-space-sm flex-shrink-0 text-right">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-primary font-bold">r = 0.94</span>
+<span class="font-label-sm text-label-sm text-tertiary">ΔH +3.8</span>
+</div>
+<div class="w-12 h-6 flex items-center justify-center">
+<svg class="w-full h-full" viewbox="0 0 40 16">
+<path d="M2,14 L15,13 L22,8 L32,3 L38,2" fill="none" stroke="#00e5ff" stroke-width="2"></path>
+</svg>
+</div>
+</div>
+</div>
+<!-- Signal 3 -->
+<div class="p-space-sm bg-surface-container rounded flex items-center justify-between transition-colors hover:bg-surface-container-high">
+<div class="flex flex-col min-w-0 pr-space-sm">
+<span class="font-label-md text-label-md text-on-surface font-bold truncate">kafka.consumer.fetch_latency</span>
+<span class="font-label-sm text-label-sm text-outline truncate">Group Coordinator Sync Resiliency</span>
+</div>
+<div class="flex items-center gap-space-sm flex-shrink-0 text-right">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-primary font-bold">r = 0.89</span>
+<span class="font-label-sm text-label-sm text-tertiary">ΔH +2.9</span>
+</div>
+<div class="w-12 h-6 flex items-center justify-center">
+<svg class="w-full h-full" viewbox="0 0 40 16">
+<path d="M2,14 L10,14 L20,12 L28,8 L38,4" fill="none" stroke="#00e5ff" stroke-width="2"></path>
+</svg>
+</div>
+</div>
+</div>
+<!-- Signal 4 -->
+<div class="p-space-sm bg-surface-container rounded flex items-center justify-between transition-colors hover:bg-surface-container-high">
+<div class="flex flex-col min-w-0 pr-space-sm">
+<span class="font-label-md text-label-md text-on-surface font-bold truncate">tcp.retrans_segs</span>
+<span class="font-label-sm text-label-sm text-outline truncate">Socket Kernel Drops on Pod Interface</span>
+</div>
+<div class="flex items-center gap-space-sm flex-shrink-0 text-right">
+<div class="flex flex-col">
+<span class="font-label-md text-label-md text-on-surface-variant font-bold">r = 0.74</span>
+<span class="font-label-sm text-label-sm text-outline">ΔH +1.6</span>
+</div>
+<div class="w-12 h-6 flex items-center justify-center">
+<svg class="w-full h-full" viewbox="0 0 40 16">
+<path d="M2,14 L14,14 L24,10 L30,12 L38,8" fill="none" stroke="#849396" stroke-width="2"></path>
+</svg>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- B: Historical Incident Matches (Explainable Similarity) -->
+<div class="bg-surface-container-low p-space-lg rounded shadow-sm flex flex-col gap-space-md">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="material-symbols-outlined text-primary text-[18px]">find_in_page</span>
+<h2 class="font-headline-sm text-headline-sm text-on-surface font-bold">Correlated Historical Signatures</h2>
+</div>
+<span class="font-label-sm text-label-sm bg-surface-container px-2 py-0.5 rounded text-outline">Cluster Memory: 3 Years</span>
+</div>
+<!-- Top Match: INC-7210 -->
+<div class="bg-surface-container p-space-md rounded flex flex-col gap-space-sm relative group hover:bg-surface-bright transition-colors shadow-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="font-label-md text-label-md text-primary font-bold">INC-7210</span>
+<span class="text-outline font-label-sm text-label-sm">Nov 24, 2024</span>
+</div>
+<span class="px-2 py-0.5 rounded font-label-sm text-label-sm bg-tertiary/15 text-tertiary font-bold">
+                94.6% MATCH
+              </span>
+</div>
+<div class="font-body-md text-body-md text-on-surface font-semibold">
+              Black Friday Checkout Thread Exhaustion
+            </div>
+<div class="p-space-sm bg-surface-container-lowest rounded flex flex-col gap-1 text-on-surface-variant font-body-sm text-body-sm">
+<div class="text-outline font-label-sm text-label-sm uppercase font-semibold">Triad Signature Alignment:</div>
+<p class="leading-relaxed">
+                Identical triad signature: DB pool exhaustion preceding GC freeze leading directly to partition rebalance.
+              </p>
+</div>
+<div class="flex flex-col gap-1 font-body-sm text-body-sm text-on-surface-variant">
+<span class="text-outline font-label-sm text-label-sm uppercase font-semibold">Historical Resolution:</span>
+<p class="text-tertiary-fixed-dim">
+                Resolved by bumping HikariCP pool from 100 to 250 and tuning G1GC region size to 16MB.
+              </p>
+</div>
+<div class="pt-space-xs flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-outline">MTTR: 18m (Auto-remediated)</span>
+<a class="inline-flex items-center gap-1 font-label-sm text-label-sm text-primary-container hover:text-primary font-bold" href="#">
+<span>Compare Incident Side-by-Side</span>
+<span class="material-symbols-outlined text-[14px]">arrow_forward</span>
+</a>
+</div>
+</div>
+<!-- Secondary Match: INC-6102 -->
+<div class="bg-surface-container p-space-md rounded flex flex-col gap-space-sm relative group hover:bg-surface-bright transition-colors opacity-90 shadow-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-space-xs">
+<span class="font-label-md text-label-md text-on-surface font-bold">INC-6102</span>
+<span class="text-outline font-label-sm text-label-sm">Aug 11, 2024</span>
+</div>
+<span class="px-2 py-0.5 rounded font-label-sm text-label-sm bg-surface-container-high text-on-surface-variant font-bold">
+                68.2% MATCH
+              </span>
+</div>
+<div class="font-body-md text-body-md text-on-surface font-semibold">
+              Redis Node Eviction Ripple
+            </div>
+<p class="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
+              Threadpool starvation was shared, but lacked JVM GC freeze or Hikari pool exhaustion component.
+            </p>
+<div class="pt-space-xs flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-outline">Resolved via node scale-out</span>
+<a class="inline-flex items-center gap-1 font-label-sm text-label-sm text-outline hover:text-on-surface font-bold" href="#">
+<span>View Snapshot</span>
+<span class="material-symbols-outlined text-[14px]">open_in_new</span>
+</a>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- 5. Bottom Remediation & Diagnostic Command Dispatch Console -->
+<footer class="bg-surface-container-low p-space-lg rounded shadow-sm flex flex-col md:flex-row items-center justify-between gap-space-md">
+<div class="flex items-center gap-space-md">
+<div class="w-10 h-10 rounded bg-primary/10 flex items-center justify-center text-primary-container">
+<span class="material-symbols-outlined text-[24px]">terminal</span>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-space-sm font-label-md text-label-md text-on-surface font-bold">
+<span>Recommended Mitigation Script:</span>
+<code class="text-primary-fixed bg-surface-container px-2 py-0.5 rounded">runbook_checkout_leak_drain.sh</code>
+</div>
+<span class="font-body-sm text-body-sm text-outline">
+            Applies Hikari connection-lease throttle and executes soft rolling restart of 2 corrupted worker pods.
+          </span>
+</div>
+</div>
+<div class="flex items-center gap-space-sm flex-shrink-0">
+<button class="px-space-md py-space-sm rounded bg-surface-container hover:bg-surface-container-high text-on-surface font-label-md text-label-md transition-colors" type="button">
+          Dry Run Simulation
+        </button>
+<button class="px-space-md py-space-sm rounded bg-primary-container text-on-primary-container hover:bg-primary font-label-md text-label-md font-bold transition-colors shadow-sm" type="button">
+          Execute Automated Remediation
+        </button>
+</div>
+</footer>
+</div>
+</div>
+<script>
+  // Simple reactive timer increment for the live incident duration indicator
+  (function initDurationTimer() {
+    const el = document.getElementById('live-timer');
+    if (!el) return;
+    let seconds = 34 * 60 + 12;
+    setInterval(() => {
+      seconds++;
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      el.textContent = `${m}m ${s < 10 ? '0' : ''}${s}s`;
+    }, 1000);
+  })();
+</script></main></div></body></html>
