@@ -7,6 +7,7 @@ import streamlit as st
 from app import theme as th
 from app.components import ui
 from app.services import backend as svc
+from src.data.windows_collector import CollectorState
 
 
 def _severity_counts(incidents) -> dict[str, int]:
@@ -41,7 +42,7 @@ def _service_rows(storage, demo):
     return sorted(by_service.items()), changed
 
 
-def render(storage, demo, backend_name: str) -> None:
+def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
     ui.page_header(
         "Fleet observability / incident overview",
         "System Operations &amp; Incident Pulse",
@@ -49,6 +50,70 @@ def render(storage, demo, backend_name: str) -> None:
         "figure below comes from the selected backend or the current session "
         "analysis — never invented.",
     )
+
+    live = live or {}
+    collector = live.get("collector")
+
+    # ------------------------------------------------------------------
+    # Live observations (real Windows telemetry)
+    # ------------------------------------------------------------------
+    if collector is not None:
+        with st.container(border=True):
+            ui.panel_header(
+                "Live observations — real Windows telemetry",
+                f"Source: windows_local · host: {collector.host_id} · "
+                f"ingesting into the selected ({backend_name}) backend",
+            )
+            host = collector.last_host_measurement
+            state_tone = (
+                "chip-critical"
+                if collector.state == CollectorState.ERROR
+                else "chip-low"
+            )
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                ui.metric_card(
+                    "Collector",
+                    collector.state.value.upper(),
+                    trend_dir="ok" if collector.state == CollectorState.RUNNING else "down",
+                )
+                st.markdown(
+                    f"<span class='reson-sub'>{th.chip(collector.state.value.upper(), state_tone)}</span>",
+                    unsafe_allow_html=True,
+                )
+            with c2:
+                ui.metric_card(
+                    "CPU",
+                    f"{host.cpu_percent:.1f}%" if host and host.cpu_percent is not None else "—",
+                    sub="host utilization, percent",
+                )
+            with c3:
+                ui.metric_card(
+                    "Memory",
+                    f"{host.memory_percent:.1f}%" if host and host.memory_percent is not None else "—",
+                    sub="physical memory utilization, percent",
+                )
+            with c4:
+                last = (
+                    host.timestamp.strftime("%H:%M:%S UTC")
+                    if host is not None
+                    else "never"
+                )
+                ui.metric_card(
+                    "Last sample",
+                    last,
+                    sub="UTC observation timestamp",
+                )
+            if collector.last_error:
+                st.error(f"Collection error: {collector.last_error}")
+            procs = collector.last_process_measurements
+            if procs:
+                st.markdown(
+                    f"<span class='reson-sub'>"
+                    f"{len(procs)} process(es) observed in the last cycle"
+                    "</span>",
+                    unsafe_allow_html=True,
+                )
 
     counts = svc.storage_counts(storage)
     incidents = svc.ordered_incidents(storage)
@@ -311,3 +376,121 @@ def render(storage, demo, backend_name: str) -> None:
                         f"deviated to {deviation.value:.3f}",
                         tone,
                     )
+
+    # ------------------------------------------------------------------
+    # Baseline readiness and historical comparison (live observations)
+    # ------------------------------------------------------------------
+    if live:
+        host_id = collector.host_id if collector else None
+        if host_id:
+            readiness = live.get("readiness", {})
+            if readiness:
+                with st.container(border=True):
+                    ui.panel_header(
+                        "Baseline readiness",
+                        "Evidence-based readiness, per stored metric identity",
+                    )
+                    rows = [
+                        {
+                            "Metric": f"{key.service} / {key.metric_name}",
+                            "Readiness": str(
+                                getattr(state, "value", state)
+                            ),
+                            "Historical samples": live.get(
+                                "historical_sample_counts", {}
+                            ).get(key, 0),
+                        }
+                        for key, state in sorted(readiness.items())
+                    ]
+                    st.dataframe(rows, width="stretch", hide_index=True)
+                    st.caption(
+                        "READY = enough samples for a baseline. "
+                        "INSUFFICIENT_DATA = collecting, not enough yet. "
+                        "UNAVAILABLE = no observations. STALE = baseline "
+                        "predates the current period."
+                    )
+
+        comparison = live.get("comparison")
+        comparison_error = live.get("comparison_error")
+        with st.container(border=True):
+            ui.panel_header(
+                "Historical comparison — today vs prior day (UTC)",
+                "Real observation windows compared through the existing "
+                "intelligence engine; missing history is reported, not faked.",
+            )
+            if comparison_error:
+                st.error(f"Comparison unavailable: {comparison_error}")
+            elif comparison is None:
+                ui.empty_state(
+                    "No host selected",
+                    "Start real Windows observation to enable "
+                    "today-vs-prior-day comparison.",
+                )
+            elif not comparison.sufficient:
+                st.info(
+                    "Cross-day comparison unavailable: "
+                    + "; ".join(comparison.reasons)
+                )
+                if comparison.incompatible_units:
+                    st.markdown(
+                        "Units disagree (not compared): "
+                        + ", ".join(comparison.incompatible_units)
+                    )
+                if comparison.missing_metrics:
+                    st.markdown(
+                        "Requested metrics with no data: "
+                        + ", ".join(comparison.missing_metrics)
+                    )
+            else:
+                anomalous = [d for d in comparison.deviations if d.is_anomalous]
+                c1, c2, c3 = st.columns(3)
+                c1.metric_card(
+                    "Baselines ready",
+                    str(len(comparison.metrics_compared)),
+                    sub="of compared metrics",
+                )
+                c2.metric_card(
+                    "Anomalous deviations",
+                    str(len(anomalous)),
+                    sub="current window vs baseline",
+                )
+                c3.metric_card(
+                    "Change points",
+                    str(len(comparison.change_points)),
+                    sub="sustained anomalous runs",
+                )
+                st.markdown(
+                    "<span class='reson-sub'>"
+                    f"Historical window: "
+                    f"{comparison.historical_window[0].strftime('%Y-%m-%d %H:%M UTC')} → "
+                    f"{comparison.historical_window[1].strftime('%Y-%m-%d %H:%M UTC')} · "
+                    f"Current window: "
+                    f"{comparison.current_window[0].strftime('%Y-%m-%d %H:%M UTC')} → "
+                    f"{comparison.current_window[1].strftime('%Y-%m-%d %H:%M UTC')}"
+                    "</span>",
+                    unsafe_allow_html=True,
+                )
+                if comparison.reasons:
+                    st.caption(" | ".join(comparison.reasons))
+                if anomalous:
+                    with st.container(border=True):
+                        ui.panel_header(
+                            "Deviations vs prior-day baseline",
+                            "Correlated evidence, not a confirmed cause.",
+                        )
+                        rows = [
+                            {
+                                "Time (UTC)": d.timestamp.strftime("%H:%M:%S"),
+                                "Metric": d.key.metric_name,
+                                "Value": round(d.value, 3),
+                                "z-score": (
+                                    round(d.z_score, 3)
+                                    if d.z_score is not None
+                                    else "—"
+                                ),
+                            }
+                            for d in sorted(
+                                anomalous, key=lambda d: d.timestamp
+                            )[:10]
+                        ]
+                        st.dataframe(rows, width="stretch", hide_index=True)

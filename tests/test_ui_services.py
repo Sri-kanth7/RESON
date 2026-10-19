@@ -1,12 +1,17 @@
 """Tests for UI-facing services (offline, deterministic, no Streamlit run)."""
 
+from __future__ import annotations
+
 import pytest
+from datetime import datetime, timedelta, timezone
 
 from app import theme as th
 from app.services import backend as svc
 from src.common.config import get_config
 from src.data.memory_storage import InMemoryStorage
+from src.data.schemas import Environment, Metric
 from src.data.supabase_client import get_supabase_client
+from src.intelligence.baseline import BaselineReadiness
 
 
 @pytest.fixture
@@ -192,6 +197,194 @@ def test_accent_class():
     assert th.accent_class("HIGH") == "reson-accent-high"
     assert th.accent_class("low") == "reson-accent-low"
     assert th.accent_class("unknown") == ""
+
+
+# ---------------------------------------------------------------------------
+# Storage health and observation wiring
+# ---------------------------------------------------------------------------
+
+
+def test_storage_health_reports_operational_and_counts(offline_env):
+    app = svc.build_application("memory")
+    health = svc.storage_health(app.storage)
+
+    assert health["operational"] is True
+    assert health["error"] is None
+    assert health["counts"]["metrics"] == 0
+
+
+def test_storage_health_distinguishes_mode_from_health(offline_env):
+    app = svc.build_application("memory")
+    health = svc.storage_health(app.storage)
+
+    # Memory mode is operational with no Supabase contact.
+    assert health["operational"] is True
+
+
+def test_observation_publish_ingests_real_measurements(offline_env):
+    from src.data.windows_collector import HostMeasurement, ProcessMeasurement
+
+    app = svc.build_application("memory")
+    publish = svc.observation_publish(app.ingestion)
+
+    now = datetime(2026, 1, 15, 9, 30, 0, tzinfo=timezone.utc)
+    host = HostMeasurement(
+        timestamp=now,
+        host_id="test-host",
+        source="windows_local",
+        cpu_percent=42.5,
+        memory_percent=60.0,
+        memory_used_bytes=8_000_000_000,
+        memory_total_bytes=16_000_000_000,
+        ok=True,
+    )
+    processes = (
+        ProcessMeasurement(
+            timestamp=now,
+            host_id="test-host",
+            source="windows_local",
+            pid=101,
+            name="svchost.exe",
+            cpu_percent=5.5,
+            memory_rss_bytes=42_000_000,
+            status="running",
+            ok=True,
+        ),
+    )
+
+    publish(host, processes)
+
+    host_metrics = app.storage.get_metrics(service="test-host")
+    process_metrics = app.storage.get_metrics(service="test-host:101")
+    assert len(host_metrics) == 4  # cpu, memory %, used, total
+    assert len(process_metrics) == 2  # process cpu, process rss
+    assert all(m.source == "windows_local" for m in [*host_metrics, *process_metrics])
+    assert all(m.host_id == "test-host" for m in [*host_metrics, *process_metrics])
+
+
+def test_observation_publish_omits_unavailable_measurements(offline_env):
+    from src.data.windows_collector import HostMeasurement
+
+    app = svc.build_application("memory")
+    publish = svc.observation_publish(app.ingestion)
+
+    now = datetime(2026, 1, 15, 9, 30, 0, tzinfo=timezone.utc)
+    host = HostMeasurement(
+        timestamp=now,
+        host_id="test-host",
+        source="windows_local",
+        cpu_percent=None,
+        memory_percent=None,
+        memory_used_bytes=None,
+        memory_total_bytes=None,
+        ok=False,
+        error="wmi down",
+    )
+
+    publish(host, ())
+
+    assert app.storage.get_metrics(service="test-host") == []
+
+
+def test_host_readiness_from_stored_observations(offline_env):
+    app = svc.build_application("memory")
+    host_id = "readiness-host"
+
+    now = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
+    for index, value in enumerate([40.0, 41.0, 42.0]):
+        app.storage.save_metric(
+            Metric(
+                timestamp=now + timedelta(minutes=index * 5),
+                service=host_id,
+                environment=Environment.PRODUCTION,
+                metric_name="cpu_percent",
+                value=value,
+                unit="percent",
+                source="windows_local",
+                host_id=host_id,
+            )
+        )
+
+    readiness = svc.host_readiness(app.storage, host_id=host_id)
+    assert len(readiness) == 1
+    key = next(iter(readiness))
+    assert readiness[key] == BaselineReadiness.READY
+
+
+def test_host_readiness_insufficient(offline_env):
+    app = svc.build_application("memory")
+    host_id = "readiness-host"
+    now = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
+    app.storage.save_metric(
+        Metric(
+            timestamp=now,
+            service=host_id,
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=40.0,
+            unit="percent",
+            source="windows_local",
+            host_id=host_id,
+        )
+    )
+    readiness = svc.host_readiness(app.storage, host_id=host_id)
+    assert next(iter(readiness.values())) == BaselineReadiness.INSUFFICIENT_DATA
+
+
+def test_compare_today_vs_prior_day_no_history(offline_env):
+    app = svc.build_application("memory")
+    host_id = "compare-host"
+    reference = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
+
+    result = svc.compare_today_vs_prior_day(
+        app.storage, host_id=host_id, source="windows_local",
+        reference_time=reference,
+    )
+
+    assert result.sufficient is False
+    assert result.analysis is None
+    assert any("no historical" in reason.lower() for reason in result.reasons)
+
+
+def test_compare_today_vs_prior_day_with_history(offline_env):
+    app = svc.build_application("memory")
+    host_id = "compare-host"
+    reference = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
+    yesterday = reference - timedelta(days=1)
+
+    for index, value in enumerate([40.0, 41.0, 42.0, 41.0, 40.0]):
+        app.storage.save_metric(
+            Metric(
+                timestamp=yesterday + timedelta(minutes=index * 5),
+                service=host_id,
+                environment=Environment.PRODUCTION,
+                metric_name="cpu_percent",
+                value=value,
+                unit="percent",
+                source="windows_local",
+                host_id=host_id,
+            )
+        )
+    app.storage.save_metric(
+        Metric(
+            timestamp=reference,
+            service=host_id,
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=90.0,
+            unit="percent",
+            source="windows_local",
+            host_id=host_id,
+        )
+    )
+
+    result = svc.compare_today_vs_prior_day(
+        app.storage, host_id=host_id, source="windows_local",
+        reference_time=reference,
+    )
+
+    assert result.sufficient is True
+    assert any(d.is_anomalous for d in result.deviations)
 
 
 def test_sparkline_renders_real_values_only():

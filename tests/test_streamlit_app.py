@@ -101,3 +101,67 @@ def test_all_pages_render_after_demonstration(no_credentials):
         at.radio[0].set_value(page).run()
         assert not at.exception, (page, at.exception)
 
+
+def test_sidebar_shows_memory_mode_and_offline_status(no_credentials):
+    at = run_app()
+    at.selectbox[0].set_value("memory").run()
+    assert not at.exception, at.exception
+    texts = [str(m.value) for m in at.markdown]
+    assert any("memory" in t.lower() for t in texts)
+    assert any("memory only" in t.lower() or "ram" in t.lower() for t in texts)
+
+
+def test_sidebar_shows_operational_status_when_reachable(no_credentials):
+    at = run_app()
+    at.selectbox[0].set_value("memory").run()
+    assert not at.exception, at.exception
+    texts = [str(m.value) for m in at.markdown]
+    assert any("operational: yes" in t.lower() for t in texts)
+
+
+def test_observation_start_stop_twice_no_duplicate_collector(no_credentials):
+    at = run_app()
+    at.selectbox[0].set_value("memory").run()
+    assert not at.exception, at.exception
+    start_buttons = [b for b in at.button if str(b.label) == "Start observation"]
+    assert start_buttons, "expected a Start observation button"
+    start_buttons[0].click().run()
+    assert not at.exception, at.exception
+    # While running, the start button must be disabled so a UI rerun cannot
+    # start a duplicate collection loop.
+    start_buttons = [b for b in at.button if str(b.label) == "Start observation"]
+    assert start_buttons
+    assert getattr(start_buttons[0].proto, "disabled", False) is True
+    stop_buttons = [b for b in at.button if str(b.label) == "Stop observation"]
+    assert stop_buttons, "expected a Stop observation button"
+    stop_buttons[0].click().run()
+    assert not at.exception, at.exception
+
+
+def test_overview_empty_state_without_data(no_credentials):
+    at = run_app()
+    at.selectbox[0].set_value("memory").run()
+    assert not at.exception, at.exception
+    texts = [str(m.value) for m in at.markdown]
+    assert any("first run" in t.lower() or "storage is empty" in t.lower() for t in texts)
+
+
+def test_switching_backend_stops_collector_and_clears_app(no_credentials):
+    at = run_app()
+    at.selectbox[0].set_value("memory").run()
+    assert not at.exception, at.exception
+    start_buttons = [b for b in at.button if str(b.label) == "Start observation"]
+    assert start_buttons
+    start_buttons[0].click().run()
+    assert not at.exception, at.exception
+    # Switching to supabase without credentials must fail loudly, not fall back.
+    at.selectbox[0].set_value("supabase").run()
+    assert not at.exception, at.exception
+    texts = [str(m.value) for m in at.markdown] + [
+        str(e.value) for e in at.error
+    ]
+    assert any(
+        "supabase" in t.lower() and ("configured" in t.lower() or "unreachable" in t.lower())
+        for t in texts
+    ), texts
+

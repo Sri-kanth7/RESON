@@ -7,8 +7,10 @@ caller's responsibility.
 
 from __future__ import annotations
 
+from datetime import datetime
 from statistics import mean, stdev
 from typing import Iterable, Sequence
+from enum import Enum
 
 from src.intelligence.models import (
     BaselineKey,
@@ -123,3 +125,46 @@ class BaselineBuilder:
                 baselines[baseline.key] = baseline
 
         return baselines
+
+
+class BaselineReadiness(str, Enum):
+    """Evidence-based baseline readiness for one metric series.
+
+    Readiness reflects actual sample counts, recency, and the baseline
+    algorithm's minimum-sample requirement -- not the mere existence of a
+    collection session.
+    """
+
+    UNAVAILABLE = "unavailable"  # no observations at all
+    INSUFFICIENT_DATA = "insufficient_data"  # too few samples for a baseline
+    READY = "ready"  # enough recent samples for a usable baseline
+    STALE = "stale"  # enough samples, but the window predates the reference
+
+
+def assess_series_readiness(
+    series: MetricSeries,
+    config: IntelligenceConfig | None = None,
+    reference_time: datetime | None = None,
+) -> BaselineReadiness:
+    """Assess whether a series can support a baseline at ``reference_time``.
+
+    ``reference_time`` defaults to the latest observation timestamp, which
+    makes a fully populated series ``READY`` by construction; callers assessing
+    readiness *for the present* should pass ``datetime.now(timezone.utc)`` so
+    an old baseline is reported ``STALE`` instead.
+    """
+    intelligence_config = config or IntelligenceConfig()
+
+    if series.count == 0:
+        return BaselineReadiness.UNAVAILABLE
+
+    if series.count < intelligence_config.min_observations_per_baseline:
+        return BaselineReadiness.INSUFFICIENT_DATA
+
+    if reference_time is not None:
+        last_observation = series.observations[-1]
+        age_seconds = (reference_time - last_observation.timestamp).total_seconds()
+        if age_seconds > intelligence_config.max_gap_seconds:
+            return BaselineReadiness.STALE
+
+    return BaselineReadiness.READY

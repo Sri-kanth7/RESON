@@ -10,17 +10,24 @@ simulator and is always labeled as simulated.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Iterable
 
 from src.data.dataset import HistoricalDatasetBuilder
 from src.data.dataset_service import HistoricalDatasetService
 from src.data.ingestion import TelemetryIngestionService
-from src.data.schemas import Deployment, Event, Incident, Log, Metric
+from src.data.schemas import Deployment, Environment, Event, Incident, Log, Metric
 from src.data.storage import Storage
+from src.data.windows_collector import (
+    SOURCE_WINDOWS_LOCAL,
+    observations_to_metrics,
+)
 from src.incidents.lifecycle import IncidentLifecycle
 from src.incidents.models import IncidentIntelligenceResult
 from src.incidents.reconstruction import HistoricalSignalContext
 from src.incidents.service import IncidentIntelligenceService
+from src.intelligence.baseline import BaselineReadiness, assess_series_readiness
+from src.intelligence.historical_comparison import compare_periods
 from src.intelligence.models import (
     BaselineKey,
     BehaviorAnalysis,
@@ -29,6 +36,7 @@ from src.intelligence.models import (
     MetricDeviation,
 )
 from src.intelligence.service import BehaviorIntelligenceService
+from src.preprocessing.normalizer import group_metrics, slice_series
 from src.orchestrator import RESONApplication, create_application
 
 DEMO_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -263,3 +271,115 @@ def mark_investigating(storage: Storage, incident: Incident) -> Incident:
     updated = IncidentLifecycle().investigate(incident)
     storage.save_incident(updated)
     return updated
+
+
+def storage_health(storage: Storage) -> dict:
+    """Report whether the storage backend is operational, separate from its mode.
+
+    Returns ``{"operational": bool, "error": str | None, "counts": dict}``.
+    A backend that can be read is treated as operational; a write failure is
+    surfaced by the caller's write path. This never contacts Supabase itself
+    -- it only exercises the abstraction the application already uses.
+    """
+    try:
+        counts = storage_counts(storage)
+        return {"operational": True, "error": None, "counts": counts}
+    except Exception as exc:  # backend-specific failure, reported as-is
+        return {"operational": False, "error": str(exc), "counts": {}}
+
+
+def observation_publish(ingestion: TelemetryIngestionService):
+    """Return a collector publish callback that ingests real measurements.
+
+    The callback converts collector output to the canonical telemetry contract
+    and ingests it through the existing ingestion service. Collection failures
+    (exceptions raised by ingestion) propagate to the collector's error state
+    rather than being swallowed.
+    """
+
+    def publish(host, processes) -> None:
+        records = observations_to_metrics(host, processes)
+        if records:
+            ingestion.ingest(records)
+
+    return publish
+
+
+def host_readiness(
+    storage: Storage,
+    host_id: str,
+    source: str | None = None,
+    metric_names: Iterable[str] | None = None,
+    reference_time: datetime | None = None,
+) -> dict[BaselineKey, BaselineReadiness]:
+    """Baseline readiness per metric for one host, from stored observations."""
+
+    metrics = [
+        metric
+        for metric in storage.get_metrics(service=host_id)
+        if (source is None or metric.source == source)
+        and (metric_names is None or metric.metric_name in metric_names)
+    ]
+
+    readiness: dict[BaselineKey, list] = {}
+    for metric in metrics:
+        readiness.setdefault(
+            BaselineKey(
+                service=metric.service,
+                environment=metric.environment,
+                metric_name=metric.metric_name,
+            ),
+            [],
+        ).append(metric)
+
+    result: dict[BaselineKey, BaselineReadiness] = {}
+    for key, records in readiness.items():
+        series = group_metrics(records)[0]
+        result[key] = assess_series_readiness(
+            series, reference_time=reference_time
+        )
+    return result
+
+
+def compare_today_vs_prior_day(
+    storage: Storage,
+    *,
+    host_id: str,
+    source: str | None = None,
+    metric_names: Iterable[str] | None = None,
+    reference_time: datetime | None = None,
+) -> HistoricalComparisonResult:
+    """Compare today's observations against the prior calendar day (UTC).
+
+    The current window is ``[start_of_today, reference_time]`` and the
+    historical window is the previous calendar day. Returns a result whose
+    ``sufficient`` flag and ``reasons`` explain exactly when the comparison
+    cannot be completed (for example no prior-day history in memory mode).
+    """
+
+    reference_time = reference_time or datetime.now(timezone.utc)
+    today_start = reference_time.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    yesterday_start = today_start - timedelta(days=1)
+    # The historical window ends at today_start (exclusive in slice_series,
+    # inclusive in the storage query). The combined [start, end) semantics
+    # correctly include all of yesterday and none of today; subtracting a
+    # microsecond here would drop the final microsecond of the historical day.
+    yesterday_end = today_start
+
+    # BehaviorIntelligenceService slices the analysis window half-open
+    # [start, end), so extend the inclusive end by one microsecond to keep
+    # the final observation (same idiom the service uses internally).
+    current_end = reference_time + timedelta(microseconds=1)
+
+    return compare_periods(
+        storage,
+        host_id=host_id,
+        source=source,
+        metric_names=metric_names,
+        current_start=today_start,
+        current_end=current_end,
+        historical_start=yesterday_start,
+        historical_end=yesterday_end,
+    )

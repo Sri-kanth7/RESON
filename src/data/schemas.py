@@ -140,11 +140,22 @@ class Service(RESONModel):
 
 
 class Metric(TelemetryBase):
-    """A numerical system measurement."""
+    """A numerical system measurement.
+
+    ``source`` identifies the telemetry source (for example ``"windows_local"``
+    for real host telemetry collected by :mod:`src.data.windows_collector`, or
+    unset for simulated/fixture telemetry) so real measurements remain
+    distinguishable from simulated data throughout the pipeline and storage.
+    ``host_id`` is the stable reference of the computer the observation was
+    collected on. Both are optional and default to ``None`` so existing
+    simulated and historical records validate unchanged.
+    """
 
     metric_name: str = Field(min_length=1)
     value: float
     unit: str = Field(min_length=1)
+    source: str | None = None
+    host_id: str | None = None
 
 
 class Log(TelemetryBase):
