@@ -569,6 +569,126 @@ def test_concurrent_writes_from_multiple_threads(tmp_db_path):
     }
 
 
+def test_concurrent_reads_while_writes_are_in_progress(tmp_db_path):
+    """Reads may run while writer threads are publishing; neither fails.
+
+    The UI reads storage while the collector writes from a background
+    thread. WAL mode allows this, and the write path must not block reads
+    into errors.
+    """
+    storage = SQLiteStorage(tmp_db_path)
+    errors: list[Exception] = []
+    reader_count = 4
+    writer_count = 4
+    batches_per_writer = 10
+    metrics_per_batch = 5
+    barrier = threading.Barrier(reader_count + writer_count)
+    # The exact set of records the writers commit; any row a reader observes
+    # mid-write must be one of these, fully formed.
+    expected_values = {
+        float(index * 1000 + batch * 10 + offset)
+        for index in range(writer_count)
+        for batch in range(batches_per_writer)
+        for offset in range(metrics_per_batch)
+    }
+
+    def writer(index: int) -> None:
+        try:
+            barrier.wait()
+            for batch in range(batches_per_writer):
+                storage.save_metrics(
+                    [
+                        _make_metric(
+                            value=float(index * 1000 + batch * 10 + offset),
+                            name=f"writer-{index}",
+                        )
+                        for offset in range(metrics_per_batch)
+                    ]
+                )
+        except Exception as exc:  # surface, do not swallow
+            errors.append(exc)
+
+    def reader() -> None:
+        previous_count = 0
+        try:
+            barrier.wait()
+            for _ in range(10):
+                # Writers only insert, so each successive read must observe a
+                # committed count at least as large as the previous one.
+                current = storage._counts()["metrics"]
+                assert current >= previous_count, (previous_count, current)
+                previous_count = current
+                # Every row observed mid-write must be a fully committed
+                # record with the exact shape the writers produce; a torn or
+                # partial row would break one of these invariants.
+                for row in storage.get_metrics():
+                    writer_index = int(row.value) // 1000
+                    assert row.service == "test-service"
+                    assert row.unit == "percent"
+                    assert row.metric_name == f"writer-{writer_index}"
+                    assert row.value in expected_values
+        except Exception as exc:  # surface, do not swallow
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(index,)) for index in range(writer_count)]
+    threads += [threading.Thread(target=reader) for _ in range(reader_count)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors, errors
+    expected = writer_count * batches_per_writer * metrics_per_batch
+    assert len(storage.get_metrics()) == expected
+
+
+def test_failed_write_rolls_back_completely_and_releases_lock(tmp_db_path):
+    """A failed batch rolls back atomically and later writes still succeed.
+
+    Error propagation must survive the concurrency fix: constraint errors
+    surface unchanged (no retry, no swallowing), partial batches leave no
+    rows behind, and the write lock is released for subsequent transactions.
+    """
+    storage = SQLiteStorage(tmp_db_path)
+    storage.save_metrics([_make_metric(value=1.0, name="kept")])
+
+    duplicate = _make_metric(value=2.0, name="dup")
+    storage.save_metric(duplicate)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        storage.save_metrics(
+            [
+                _make_metric(value=3.0, name="before"),
+                duplicate,  # duplicate primary key aborts the batch
+                _make_metric(value=4.0, name="after"),
+            ]
+        )
+
+    # Nothing from the failed batch persisted; prior rows are untouched.
+    assert {m.value for m in storage.get_metrics()} == {1.0, 2.0}
+
+    # The write lock was released: subsequent transactions still work.
+    storage.save_metrics([_make_metric(value=5.0, name="later")])
+    assert {m.value for m in storage.get_metrics()} == {1.0, 2.0, 5.0}
+
+
+def test_wal_journal_mode_is_enabled_and_persistent(tmp_db_path):
+    """Connections run in WAL mode, confirmed once per open database."""
+    storage = SQLiteStorage(tmp_db_path)
+    storage.save_metric(_make_metric())
+    mode = storage._op(
+        lambda conn: conn.execute("PRAGMA journal_mode").fetchone()[0]
+    )
+    assert str(mode).lower() == "wal"
+
+    # A second instance against the same file inherits the persisted WAL mode.
+    again = SQLiteStorage(tmp_db_path)
+    mode2 = again._op(
+        lambda conn: conn.execute("PRAGMA journal_mode").fetchone()[0]
+    )
+    assert str(mode2).lower() == "wal"
+
+
 # ---------------------------------------------------------------------------
 # Health reporting
 # ---------------------------------------------------------------------------

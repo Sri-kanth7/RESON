@@ -27,6 +27,24 @@ migrations are non-destructive.
 The database uses WAL journal mode (``-wal``/``-shm`` sidecar files) with a
 busy timeout, so the real-time collector can write from a background thread
 while the UI reads without failing on transient lock contention.
+
+Concurrency design:
+
+* WAL is enabled once per process per database file. SQLite does not invoke
+  the busy handler for journal-mode changes, so running
+  ``PRAGMA journal_mode = WAL`` on every connection open fails immediately
+  with ``database is locked`` when several threads open connections during
+  initial database setup. WAL persists in the database file header, so a
+  one-time (serialized, bounded-retry) setup is sufficient.
+* Within a :class:`SQLiteStorage` instance, write transactions are serialized
+  with a thread-safe lock so concurrent ``save_*`` calls queue in-process
+  instead of contending for SQLite's single-writer slot. Reads are not
+  serialized; WAL allows them to proceed while a write is in flight.
+* Transient ``database is locked``/``database is busy`` errors (for example
+  from a second process writing the same file) are retried a bounded number
+  of times with exponential backoff. Each retry uses a fresh connection and
+  re-runs the full transaction, which is safe because a failed transaction is
+  rolled back first. Every other error is surfaced to the caller.
 """
 
 from __future__ import annotations
@@ -35,6 +53,8 @@ import json
 import os
 import sqlite3
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -68,6 +88,21 @@ APP_NAME = "RESON"
 
 #: Environment variable that overrides the default database path.
 SQLITE_PATH_ENV = "RESON_SQLITE_PATH"
+
+#: Maximum attempts for an operation that failed with a retryable lock error.
+_MAX_LOCK_RETRIES = 5
+
+#: Initial backoff between lock-error retries; doubles each attempt.
+_LOCK_RETRY_INITIAL_BACKOFF_SECONDS = 0.05
+
+#: Upper bound for a single backoff sleep between lock-error retries.
+_LOCK_RETRY_MAX_BACKOFF_SECONDS = 1.0
+
+#: Serializes one-time WAL journal-mode setup within this process.
+_WAL_SETUP_LOCK = threading.Lock()
+
+#: Database paths for which WAL journal mode has already been confirmed.
+_WAL_CONFIGURED_PATHS: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +157,47 @@ def _parse(value: str | None) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# Lock-contention helpers
+# ---------------------------------------------------------------------------
+
+def _is_retryable_lock_error(exc: BaseException) -> bool:
+    """Return True when ``exc`` is a transient SQLite lock/busy error.
+
+    Only ``OperationalError`` messages that explicitly report the database
+    being locked or busy are retried. Constraint violations, corrupt files,
+    read-only databases, and every other error must surface immediately.
+    """
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    message = str(exc).lower()
+    return "locked" in message or "busy" in message
+
+
+def _call_with_lock_retry(operation):
+    """Run ``operation()`` retrying only transient lock/busy errors.
+
+    ``operation`` must be safe to re-run from scratch: it must roll back or
+    discard any partially applied state before raising (each attempt opens a
+    fresh connection and closes it in a ``finally`` block). Non-retryable
+    errors are re-raised unchanged after the first attempt.
+    """
+    for attempt in range(_MAX_LOCK_RETRIES):
+        try:
+            return operation()
+        except sqlite3.OperationalError as exc:
+            if (
+                not _is_retryable_lock_error(exc)
+                or attempt == _MAX_LOCK_RETRIES - 1
+            ):
+                raise
+            delay = min(
+                _LOCK_RETRY_INITIAL_BACKOFF_SECONDS * (2**attempt),
+                _LOCK_RETRY_MAX_BACKOFF_SECONDS,
+            )
+            time.sleep(delay)
 
 
 # ---------------------------------------------------------------------------
@@ -231,22 +307,57 @@ CREATE INDEX IF NOT EXISTS idx_evidence_timestamp ON evidence(timestamp);
 """
 
 
+def _ensure_wal_mode(conn: sqlite3.Connection, db_path: Path) -> None:
+    """Enable WAL journal mode for ``db_path`` once per process.
+
+    WAL mode persists in the database file header, so it only has to be set
+    when a process first opens the file. The journal-mode change itself is
+    not covered by SQLite's busy handler: if it runs on every connection open
+    while other threads are writing during initial database setup, it fails
+    immediately with ``database is locked``. Setup is therefore serialized
+    with a process-wide lock and retried (bounded, with backoff) against
+    transient contention from other processes.
+    """
+    key = str(Path(db_path).resolve())
+    if key in _WAL_CONFIGURED_PATHS:
+        return
+    with _WAL_SETUP_LOCK:
+        if key in _WAL_CONFIGURED_PATHS:
+            return
+
+        def attempt() -> None:
+            row = conn.execute("PRAGMA journal_mode = WAL").fetchone()
+            if row is not None and str(row[0]).lower() == "wal":
+                return
+            raise sqlite3.OperationalError(
+                f"could not enable WAL journal mode for {db_path}"
+            )
+
+        _call_with_lock_retry(attempt)
+        _WAL_CONFIGURED_PATHS.add(key)
+
+
 def _connect(db_path: Path) -> sqlite3.Connection:
     """Open a connection to the database file, creating the parent directory.
 
     ``busy_timeout`` lets concurrent readers and the single writer (for example
     the real-time collector thread publishing while the UI reads) wait instead
-    of immediately failing with ``database is locked``. WAL mode allows readers
-    to proceed while a write transaction is active and persists in the database
-    file header, so it is a safe no-op once set.
+    of immediately failing with ``database is locked``. WAL mode (confirmed
+    once per process by :func:`_ensure_wal_mode`) allows readers to proceed
+    while a write transaction is active and persists in the database file
+    header.
     """
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 30000")
-    conn.execute("PRAGMA journal_mode = WAL")
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        _ensure_wal_mode(conn, db_path)
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 
@@ -265,6 +376,10 @@ class SQLiteStorage(Storage):
     def __init__(self, db_path: str | Path | None = None) -> None:
         self._db_path = Path(db_path) if db_path is not None else default_sqlite_path()
         self._schema_ensured = False
+        #: Serializes schema setup so only one thread runs the DDL script.
+        self._schema_lock = threading.Lock()
+        #: Serializes write transactions within this instance.
+        self._write_lock = threading.Lock()
 
     @property
     def db_path(self) -> Path:
@@ -276,39 +391,77 @@ class SQLiteStorage(Storage):
     # ------------------------------------------------------------------
 
     def _ensure_schema(self, conn: sqlite3.Connection) -> None:
-        """Create tables and record the schema migration (idempotent)."""
+        """Create tables and record the schema migration (idempotent).
+
+        Thread-safe: concurrent operations on this instance wait here until
+        one thread has finished running the (write-locking) DDL script, so
+        no other transaction can observe a half-created schema.
+        """
         if self._schema_ensured:
             return
-        conn.executescript(_SCHEMA.format(version=SCHEMA_VERSION))
-        conn.execute(
-            "INSERT OR IGNORE INTO schema_migrations "
-            "(version, name, applied_at) VALUES (?, ?, ?)",
-            (
-                SCHEMA_VERSION,
-                "initial_schema",
-                _iso(datetime.now(timezone.utc)),
-            ),
-        )
-        conn.commit()
-        self._schema_ensured = True
+        with self._schema_lock:
+            if self._schema_ensured:
+                return
+            conn.executescript(_SCHEMA.format(version=SCHEMA_VERSION))
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations "
+                "(version, name, applied_at) VALUES (?, ?, ?)",
+                (
+                    SCHEMA_VERSION,
+                    "initial_schema",
+                    _iso(datetime.now(timezone.utc)),
+                ),
+            )
+            conn.commit()
+            self._schema_ensured = True
 
     def _op(self, func):
-        """Run ``func(conn)`` inside a connection with schema ensured.
+        """Run ``func(conn)`` inside a read-oriented connection.
 
         The connection is committed on success, rolled back on failure, and
-        always closed.
+        always closed. Reads are not serialized with a lock; WAL mode lets
+        them run while a write transaction is active. Transient lock errors
+        are retried with a fresh connection (bounded, with backoff).
         """
-        conn = _connect(self._db_path)
-        try:
-            self._ensure_schema(conn)
-            result = func(conn)
-            conn.commit()
-            return result
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        return self._run(func, write=False)
+
+    def _write_op(self, func):
+        """Run ``func(conn)`` as a serialized write transaction.
+
+        Identical to :meth:`_op` except the operation holds this instance's
+        write lock, so concurrent ``save_*`` calls queue in-process instead
+        of competing for SQLite's single-writer slot. Every write path
+        (``save_*``) must go through this method.
+        """
+        return self._run(func, write=True)
+
+    def _run(self, func, *, write: bool):
+        """Run ``func(conn)`` with safe connection/transaction management.
+
+        Each attempt opens a fresh connection, ensures the schema, runs
+        ``func``, commits on success, and rolls back and closes in all
+        cases. Retryable lock errors trigger a bounded retry (re-running
+        the whole transaction on a fresh connection, which is safe because
+        the failed attempt was rolled back); all other errors propagate.
+        """
+
+        def attempt():
+            conn = _connect(self._db_path)
+            try:
+                self._ensure_schema(conn)
+                result = func(conn)
+                conn.commit()
+                return result
+            except Exception:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
+        if write:
+            with self._write_lock:
+                return _call_with_lock_retry(attempt)
+        return _call_with_lock_retry(attempt)
 
     def health(self) -> dict:
         """Return a status report for this database.
@@ -336,9 +489,7 @@ class SQLiteStorage(Storage):
             }
 
     def _counts(self) -> dict:
-        conn = _connect(self._db_path)
-        try:
-            self._ensure_schema(conn)
+        def func(conn: sqlite3.Connection) -> dict:
             return {
                 "metrics": conn.execute("SELECT COUNT(*) FROM metrics").fetchone()[0],
                 "logs": conn.execute("SELECT COUNT(*) FROM logs").fetchone()[0],
@@ -356,8 +507,8 @@ class SQLiteStorage(Storage):
                     "SELECT COUNT(*) FROM services"
                 ).fetchone()[0],
             }
-        finally:
-            conn.close()
+
+        return self._op(func)
 
     # ------------------------------------------------------------------
     # Services
@@ -385,7 +536,7 @@ class SQLiteStorage(Storage):
             )
             return service
 
-        return self._op(func)
+        return self._write_op(func)
 
     def get_service(self, service_id: str) -> Service | None:
         def func(conn: sqlite3.Connection) -> Service | None:
@@ -433,7 +584,7 @@ class SQLiteStorage(Storage):
             )
             return metric
 
-        return self._op(func)
+        return self._write_op(func)
 
     def save_metrics(self, metrics: list[Metric]) -> list[Metric]:
         def func(conn: sqlite3.Connection) -> list[Metric]:
@@ -463,7 +614,7 @@ class SQLiteStorage(Storage):
             )
             return list(metrics)
 
-        return self._op(func)
+        return self._write_op(func)
 
     def get_metrics(
         self,
@@ -534,7 +685,7 @@ class SQLiteStorage(Storage):
             )
             return log
 
-        return self._op(func)
+        return self._write_op(func)
 
     def save_logs(self, logs: list[Log]) -> list[Log]:
         def func(conn: sqlite3.Connection) -> list[Log]:
@@ -561,7 +712,7 @@ class SQLiteStorage(Storage):
             )
             return list(logs)
 
-        return self._op(func)
+        return self._write_op(func)
 
     def get_logs(
         self,
@@ -631,7 +782,7 @@ class SQLiteStorage(Storage):
             )
             return event
 
-        return self._op(func)
+        return self._write_op(func)
 
     def save_events(self, events: list[Event]) -> list[Event]:
         def func(conn: sqlite3.Connection) -> list[Event]:
@@ -659,7 +810,7 @@ class SQLiteStorage(Storage):
             )
             return list(events)
 
-        return self._op(func)
+        return self._write_op(func)
 
     def get_events(
         self,
@@ -729,7 +880,7 @@ class SQLiteStorage(Storage):
             )
             return deployment
 
-        return self._op(func)
+        return self._write_op(func)
 
     def save_deployments(self, deployments: list[Deployment]) -> list[Deployment]:
         def func(conn: sqlite3.Connection) -> list[Deployment]:
@@ -757,7 +908,7 @@ class SQLiteStorage(Storage):
             )
             return list(deployments)
 
-        return self._op(func)
+        return self._write_op(func)
 
     def get_deployments(
         self,
@@ -828,7 +979,7 @@ class SQLiteStorage(Storage):
             )
             return incident
 
-        return self._op(func)
+        return self._write_op(func)
 
     def get_incidents(
         self,
@@ -905,7 +1056,7 @@ class SQLiteStorage(Storage):
             )
             return evidence
 
-        return self._op(func)
+        return self._write_op(func)
 
     def get_evidence(
         self,
