@@ -84,9 +84,18 @@ def _sidebar() -> str:
     )
     backend = st.sidebar.selectbox(
         "Storage backend",
-        ("supabase", "memory"),
-        index=("supabase", "memory").index(st.session_state["reson_backend"]),
-        help="Supabase is the production default. Memory runs fully offline.",
+        ("supabase", "sqlite", "memory"),
+        index=("supabase", "sqlite", "memory").index(
+            st.session_state["reson_backend"]
+            if st.session_state["reson_backend"] in ("supabase", "sqlite", "memory")
+            else "supabase"
+        ),
+        help=(
+            "Supabase is the production default (persistent cloud storage, "
+            "requires SUPABASE_URL and SUPABASE_SECRET_KEY). SQLite stores "
+            "persistent data on your local machine with no credentials. "
+            "Memory is temporary, non-persistent storage for offline use."
+        ),
     )
     if backend != st.session_state["reson_backend"]:
         st.session_state["reson_backend"] = backend
@@ -95,11 +104,18 @@ def _sidebar() -> str:
     app = st.session_state.get("reson_app")
     if app is not None:
         health = svc.storage_health(app.storage)
-        persistent = backend == "supabase"
+        persistent = backend in ("supabase", "sqlite")
+        persistence_label = (
+            "persistent local file"
+            if backend == "sqlite"
+            else ("persistent cloud" if backend == "supabase" else "memory only (RAM)")
+        )
+        db_path = ""
+        if backend == "sqlite" and health.get("database_path"):
+            db_path = f" · {health['database_path']}"
         st.sidebar.markdown(
             "<span class='reson-sub'>"
-            f"Mode: {backend} · "
-            f"{'persistent history' if persistent else 'memory only (RAM)'} · "
+            f"Mode: {backend} · {persistence_label}{db_path} · "
             f"operational: {'yes' if health['operational'] else 'no'}"
             "</span>",
             unsafe_allow_html=True,
@@ -289,8 +305,10 @@ def _backend_error_panel(message: str) -> None:
     st.error(message)
     st.markdown(
         "Supabase is the production default and needs `SUPABASE_URL` and "
-        "`SUPABASE_SECRET_KEY`. For fully offline local use, select **memory** "
-        "in the sidebar — no credentials, no network, no silent fallback."
+        "`SUPABASE_SECRET_KEY`. SQLite stores persistent data on your local "
+        "machine with no credentials. For fully offline local use, select "
+        "**sqlite** or **memory** in the sidebar — memory is non-persistent "
+        "(RAM only), and nothing falls back silently."
     )
 
 

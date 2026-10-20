@@ -58,8 +58,18 @@ cover/
 # Django stuff:
 *.log
 local_settings.py
-db.sqlite3
-db.sqlite3-journal
+
+# SQLite databases (RESON local storage and generic dev databases)
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-journal
+*.db-wal
+*.db-shm
+reson.db
+reson.db-*
+.reson/
 
 # Flask stuff:
 instance/

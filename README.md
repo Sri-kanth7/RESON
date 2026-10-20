@@ -48,6 +48,7 @@ src/
     simulator.py          Scenario timelines (normal, latency_spike, ...)
     supabase_client.py    Supabase client factory
     supabase_storage.py   Bulk storage / retrieval
+    sqlite_storage.py     Persistent local SQLite Storage implementation
     memory_storage.py     In-memory Storage implementation (offline)
     orchestrator.py       Ingestion and retrieval orchestration
   common/
@@ -89,12 +90,18 @@ contains no intelligence of its own.
 .\.venv\Scripts\python.exe -m streamlit run app/streamlit_app.py
 ```
 
-Select **memory** in the sidebar for fully offline local use (no Supabase
-credentials, no network). Then use **Run Local Demonstration Analysis** to
-generate deterministic simulated telemetry and run the real ingestion and
-intelligence pipeline. Simulated telemetry is always labeled as simulated.
-Supabase remains the production default (`RESON_STORAGE_BACKEND`, default
-`supabase`); the app never falls back silently.
+Select **Supabase** (persistent cloud storage, needs credentials) or
+**Local SQLite** (persistent local storage, no credentials) in the sidebar for
+durable storage; **memory** is temporary, non-persistent storage for fully
+offline use. Then use **Run Local Demonstration Analysis** to generate
+deterministic simulated telemetry and run the real ingestion and intelligence
+pipeline. Simulated telemetry is always labeled as simulated. Supabase remains
+the production default (`RESON_STORAGE_BACKEND`, default `supabase`); the app
+never falls back silently. Local SQLite data is stored in an OS-appropriate
+user data directory (`%APPDATA%\RESON\reson.db` on Windows,
+`~/Library/Application Support/RESON/reson.db` on macOS,
+`$XDG_DATA_HOME/reson/reson.db` on Linux) and can be overridden with
+`RESON_SQLITE_PATH`.
 
 ## Quick Start
 

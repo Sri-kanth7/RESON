@@ -283,9 +283,24 @@ def storage_health(storage: Storage) -> dict:
     """
     try:
         counts = storage_counts(storage)
-        return {"operational": True, "error": None, "counts": counts}
+        return {
+            "operational": True,
+            "error": None,
+            "backend": type(storage).__name__,
+            "counts": counts,
+            **(
+                {"database_path": str(storage.db_path)}
+                if getattr(storage, "db_path", None) is not None
+                else {}
+            ),
+        }
     except Exception as exc:  # backend-specific failure, reported as-is
-        return {"operational": False, "error": str(exc), "counts": {}}
+        return {
+            "operational": False,
+            "error": str(exc),
+            "counts": {},
+            "backend": type(storage).__name__,
+        }
 
 
 def observation_publish(ingestion: TelemetryIngestionService):

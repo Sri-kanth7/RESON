@@ -10,6 +10,7 @@ from src.common.config import (
 )
 from src.data.ingestion import TelemetryIngestionService
 from src.data.memory_storage import InMemoryStorage
+from src.data.sqlite_storage import SQLiteStorage
 from src.data.storage import Storage
 from src.data.supabase_client import get_supabase_client
 from src.data.supabase_storage import SupabaseStorage
@@ -28,11 +29,14 @@ def create_application(storage_backend: str | None = None) -> RESONApplication:
     """Construct the RESON application and its dependencies.
 
     ``storage_backend`` explicitly selects the storage implementation:
-    ``"supabase"`` (the default) or ``"memory"`` (local, offline, no
-    credentials or network required). When omitted, the backend comes from
-    the ``RESON_STORAGE_BACKEND`` environment variable, defaulting to
-    ``"supabase"``. Unsupported values raise ``ValueError`` before anything
-    is initialized; nothing ever falls back silently.
+    ``"supabase"`` (the default, persistent cloud storage requiring
+    credentials), ``"sqlite"`` (persistent local storage on the user's
+    machine, no credentials or network required), or ``"memory"`` (temporary,
+    non-persistent in-memory storage for tests and offline development). When
+    omitted, the backend comes from the ``RESON_STORAGE_BACKEND`` environment
+    variable, defaulting to ``"supabase"``. Unsupported values raise
+    ``ValueError`` before anything is initialized; nothing ever falls back
+    silently.
     """
 
     if storage_backend is None:
@@ -48,6 +52,8 @@ def create_application(storage_backend: str | None = None) -> RESONApplication:
 
     if config.storage_backend == "memory":
         storage: Storage = InMemoryStorage()
+    elif config.storage_backend == "sqlite":
+        storage = SQLiteStorage(config.sqlite_db_path)
     else:
         supabase = get_supabase_client()
         storage = SupabaseStorage(supabase)

@@ -15,7 +15,13 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 #: Storage backends selectable via ``RESON_STORAGE_BACKEND`` or the
 #: ``storage_backend`` argument of ``create_application``.
-SUPPORTED_STORAGE_BACKENDS = ("supabase", "memory")
+#:
+#: ``supabase`` -- persistent cloud storage (requires credentials).
+#: ``sqlite`` -- persistent local storage on the user's machine (no
+#: credentials or network required).
+#: ``memory`` -- temporary, non-persistent in-memory storage (tests and
+#: offline development only).
+SUPPORTED_STORAGE_BACKENDS = ("supabase", "sqlite", "memory")
 
 #: Backend used when nothing is selected explicitly. Supabase remains the
 #: production default; existing callers observe no behavior change.
@@ -41,9 +47,12 @@ class RESONConfig(BaseModel):
 
     environment: str = "development"
 
-    storage_backend: Literal["supabase", "memory"] = DEFAULT_STORAGE_BACKEND
+    storage_backend: Literal["supabase", "sqlite", "memory"] = (
+        DEFAULT_STORAGE_BACKEND
+    )
 
     supabase: SupabaseConfig | None = None
+    sqlite_db_path: str | None = None
 
     simulation: SimulationConfig = SimulationConfig()
 
@@ -102,6 +111,8 @@ def _load_config(storage_backend: str | None = None) -> RESONConfig:
             secret_key=supabase_secret_key,
         )
 
+    sqlite_db_path = os.getenv("RESON_SQLITE_PATH")
+
     return RESONConfig(
         environment=os.getenv(
             "RESON_ENVIRONMENT",
@@ -109,6 +120,7 @@ def _load_config(storage_backend: str | None = None) -> RESONConfig:
         ),
         storage_backend=backend,  # type: ignore[arg-type]
         supabase=supabase,
+        sqlite_db_path=sqlite_db_path,
         simulation=SimulationConfig(
             seed=int(
                 os.getenv(
