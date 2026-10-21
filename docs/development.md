@@ -168,21 +168,23 @@ Without both, constructing the Supabase backend raises a clear
 
 ## Tests
 
-Full suite (requires live Supabase credentials + network):
+Full suite:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Offline suite (no credentials, no network; the supported local default):
+Offline suite (no credentials, no network):
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q --ignore=tests/test_storage.py --ignore=tests/test_supabase_connection.py
 ```
 
-`tests/test_storage.py` and `tests/test_supabase_connection.py` are live
-integration tests. Their failures with `httpx.ConnectError` / `getaddrinfo`
-mean Supabase is unreachable, not that the application is broken.
+19 tests are live Supabase integration tests. They carry the
+`requires_supabase` marker and are **skipped with an explicit reason** when
+`SUPABASE_URL` / `SUPABASE_SECRET_KEY` are absent; their assertions are
+unchanged and run in full when the credentials are present. Everything else
+runs offline against the SQLite and in-memory backends.
 
 `InMemoryStorage` (`src/data/memory_storage.py`) implements the same
 `Storage` abstraction as `SupabaseStorage` with identical filter semantics

@@ -152,6 +152,10 @@ class Signal(IntelligenceModel):
     incident (anomalous metric evidence, critical logs/events, failed
     deployments). Non-trigger signals such as successful deployments enrich a
     cluster but never start one.
+
+    ``source`` and ``host_id`` carry the provenance of the underlying
+    telemetry record, so an incident and its evidence chain can always be
+    traced back to the source the observations came from.
     """
 
     source_id: UUID
@@ -166,6 +170,8 @@ class Signal(IntelligenceModel):
     related_keys: list[BaselineKey] = Field(default_factory=list)
     source_record_ids: list[UUID] = Field(default_factory=list)
     payload: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = None
+    host_id: str | None = None
 
 
 class CorrelationCandidate(IntelligenceModel):

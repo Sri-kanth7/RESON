@@ -6,7 +6,6 @@ All tests run offline with no Supabase credentials required.
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -17,7 +16,6 @@ import pytest
 
 from src.common.config import get_config
 from src.data.ingestion import TelemetryIngestionService
-from src.data.memory_storage import InMemoryStorage
 from src.data.sqlite_storage import (
     DEFAULT_DB_FILE_NAME,
     SCHEMA_VERSION,
@@ -39,9 +37,9 @@ from src.data.schemas import (
     Log,
     LogLevel,
     Metric,
+    SOURCE_SIMULATION,
     Service,
 )
-from src.data.supabase_storage import SupabaseStorage
 from src.data.windows_collector import (
     HostMeasurement,
     ProcessMeasurement,
@@ -128,7 +126,7 @@ def test_repeated_initialization_is_safe(tmp_db_path):
         Service(name="s", environment=Environment.DEVELOPMENT, version="1.0.0")
     )
     # A second instance against the same file reads the same data.
-    services_after_reopen = second.get_metrics()  # noqa: F841 (sanity call)
+    second.get_metrics()  # sanity call: the file is readable
     # Construct a third instance and confirm schema is still intact.
     third = SQLiteStorage(tmp_db_path)
     third._op(lambda conn: conn.execute("SELECT 1").fetchone())
@@ -140,7 +138,44 @@ def test_schema_version_recorded(tmp_db_path):
     # Re-open: schema migration table persists and version is stable.
     again = SQLiteStorage(tmp_db_path)
     again._op(lambda conn: conn.execute("SELECT 1").fetchone())
-    assert SCHEMA_VERSION == 1
+    assert SCHEMA_VERSION == 4
+
+
+def test_schema_migration_table_records_every_version(tmp_db_path):
+    """Every defined migration is recorded exactly once in the database."""
+    from src.data.sqlite_storage import _MIGRATIONS
+
+    storage = SQLiteStorage(tmp_db_path)
+    storage._op(lambda conn: conn.execute("SELECT 1").fetchone())
+    rows = storage._op(
+        lambda conn: conn.execute(
+            "SELECT version FROM schema_migrations ORDER BY version"
+        ).fetchall()
+    )
+    versions = [row[0] for row in rows]
+    assert versions == sorted(set(versions))
+    # Version 0 is the baseline schema; every defined migration is applied.
+    assert 0 in versions
+    for migration in _MIGRATIONS:
+        assert int(migration["version"]) in versions
+    assert max(versions) == SCHEMA_VERSION
+
+
+def test_incident_and_evidence_gain_provenance_columns(tmp_db_path):
+    """Migration v4 adds source/host_id to the incidents and evidence tables."""
+    storage = SQLiteStorage(tmp_db_path)
+    storage._op(lambda conn: conn.execute("SELECT 1").fetchone())
+    for table in ("incidents", "evidence"):
+        columns = storage._op(
+            lambda conn, table=table: [
+                row[1]
+                for row in conn.execute(
+                    f"PRAGMA table_info({table})"
+                ).fetchall()
+            ]
+        )
+        assert "source" in columns, table
+        assert "host_id" in columns, table
 
 
 def test_pre_existing_database_migrates_and_preserves_records(tmp_db_path):
@@ -164,7 +199,6 @@ def test_pre_existing_database_migrates_and_preserves_records(tmp_db_path):
     conn.close()
 
     storage = SQLiteStorage(tmp_db_path)
-    services = storage.get_service(...) if False else None
     # The migrated database should expose its services through get_service.
     # Re-fetch the id we just inserted by querying raw SQLite.
     raw = sqlite3.connect(str(tmp_db_path))
@@ -974,3 +1008,421 @@ def test_service_with_empty_description(tmp_db_path):
     assert fetched is not None
     assert fetched.description is None
 
+
+# ---------------------------------------------------------------------------
+# Source attribution (Phase 1)
+# ---------------------------------------------------------------------------
+
+
+def _log_at(storage, when, source="sim", host_id="host-1"):
+    log = Log(
+        timestamp=when,
+        service="svc",
+        environment=Environment.DEVELOPMENT,
+        level=LogLevel.INFO,
+        message="msg",
+        source=source,
+        host_id=host_id,
+    )
+    storage.save_log(log)
+    return log
+
+
+def test_log_event_deployment_round_trip_preserves_source_and_host_id(
+    tmp_db_path,
+):
+    storage = SQLiteStorage(tmp_db_path)
+    when = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+    storage.save_log(
+        Log(
+            timestamp=when,
+            service="svc",
+            environment=Environment.DEVELOPMENT,
+            level=LogLevel.INFO,
+            message="msg",
+            source=SOURCE_WINDOWS_LOCAL,
+            host_id="host-1",
+        )
+    )
+    storage.save_event(
+        Event(
+            timestamp=when,
+            service="svc",
+            environment=Environment.DEVELOPMENT,
+            event_type=EventType.RESTART,
+            description="restarted",
+            source=SOURCE_WINDOWS_LOCAL,
+            host_id="host-1",
+        )
+    )
+    storage.save_deployment(
+        Deployment(
+            timestamp=when,
+            service="svc",
+            environment=Environment.DEVELOPMENT,
+            version="1.0",
+            status=DeploymentStatus.SUCCESS,
+            source=SOURCE_SIMULATION,
+            host_id="host-1",
+        )
+    )
+
+    logs = storage.get_logs(source=SOURCE_WINDOWS_LOCAL)
+    events = storage.get_events(source=SOURCE_WINDOWS_LOCAL)
+    deps = storage.get_deployments(source=SOURCE_SIMULATION)
+    assert len(logs) == 1 and logs[0].host_id == "host-1"
+    assert len(events) == 1 and events[0].host_id == "host-1"
+    assert len(deps) == 1 and deps[0].host_id == "host-1"
+
+    # Filtering by a different source returns nothing.
+    assert storage.get_logs(source="linux_local") == []
+    assert storage.get_events(source="linux_local") == []
+    assert storage.get_deployments(source="linux_local") == []
+
+
+def test_source_filter_combines_with_time_range(tmp_db_path):
+    storage = SQLiteStorage(tmp_db_path)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    _log_at(storage, base, source=SOURCE_WINDOWS_LOCAL)
+    _log_at(storage, base + timedelta(days=1), source=SOURCE_SIMULATION)
+
+    results = storage.get_logs(
+        source=SOURCE_WINDOWS_LOCAL,
+        start_time=base,
+        end_time=base + timedelta(days=1),
+    )
+    assert len(results) == 1
+    assert results[0].source == SOURCE_WINDOWS_LOCAL
+
+
+def test_legacy_record_without_source_is_preserved_as_none(tmp_db_path):
+    """Legacy records carry no source; they must stay None/unknown, never be
+    relabeled as real telemetry."""
+    storage = SQLiteStorage(tmp_db_path)
+    when = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+    storage.save_log(
+        Log(
+            timestamp=when,
+            service="svc",
+            environment=Environment.DEVELOPMENT,
+            level=LogLevel.INFO,
+            message="legacy",
+        )
+    )
+    fetched = storage.get_logs(service="svc")
+    assert len(fetched) == 1
+    assert fetched[0].source is None
+    assert fetched[0].host_id is None
+
+
+def test_migration_adds_source_host_id_to_legacy_telemetry_tables(tmp_db_path):
+    """A pre-existing database at schema version 1 (logs/events/deployments
+    without source/host_id columns) is migrated to version 2 non-destructively.
+    """
+    conn = sqlite3.connect(str(tmp_db_path))
+    conn.execute("PRAGMA user_version = 0")
+    conn.execute(
+        "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, "
+        "name TEXT NOT NULL, applied_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO schema_migrations (version, name, applied_at) "
+        "VALUES (1, 'initial_schema', '2026-01-01T00:00:00+00:00')"
+    )
+    conn.execute(
+        "CREATE TABLE logs (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, "
+        "service TEXT NOT NULL, environment TEXT NOT NULL, level TEXT NOT NULL, "
+        "message TEXT NOT NULL, metadata TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE events (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, "
+        "service TEXT NOT NULL, environment TEXT NOT NULL, event_type TEXT NOT NULL, "
+        "description TEXT NOT NULL, metadata TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE deployments (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, "
+        "service TEXT NOT NULL, environment TEXT NOT NULL, version TEXT NOT NULL, "
+        "status TEXT NOT NULL, metadata TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE metrics (id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, "
+        "service TEXT NOT NULL, environment TEXT NOT NULL, metric_name TEXT NOT NULL, "
+        "value REAL NOT NULL, unit TEXT NOT NULL, source TEXT, host_id TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+    storage = SQLiteStorage(tmp_db_path)
+    # Trigger schema setup + migration.
+    storage.health()
+
+    for table in ("logs", "events", "deployments"):
+        cols = storage._op(
+            lambda conn, t=table: [r[1] for r in conn.execute(
+                f"PRAGMA table_info({t})"
+            ).fetchall()]
+        )
+        assert "source" in cols, table
+        assert "host_id" in cols, table
+
+    applied = storage._op(
+        lambda conn: [r[0] for r in conn.execute(
+            "SELECT version FROM schema_migrations ORDER BY version"
+        ).fetchall()]
+    )
+    assert 2 in applied, applied
+
+    # Re-running the migration is a no-op (idempotent).
+    storage2 = SQLiteStorage(tmp_db_path)
+    storage2.health()
+    applied2 = storage2._op(
+        lambda conn: [r[0] for r in conn.execute(
+            "SELECT version FROM schema_migrations ORDER BY version"
+        ).fetchall()]
+    )
+    assert applied2 == applied
+
+
+def test_naive_timestamp_is_normalized_to_utc_on_round_trip(tmp_db_path):
+    """Naive (legacy) timestamps are stored as UTC and read back as aware
+    UTC datetimes; they are never silently treated as wall-clock local time."""
+    storage = SQLiteStorage(tmp_db_path)
+    naive = datetime(2026, 6, 15, 10, 0, 0)  # no tzinfo
+    storage.save_metric(
+        Metric(
+            timestamp=naive,
+            service="svc",
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=42.0,
+            unit="percent",
+            source=SOURCE_WINDOWS_LOCAL,
+            host_id="host-1",
+        )
+    )
+    fetched = storage.get_metrics(service="svc")
+    assert len(fetched) == 1
+    assert fetched[0].timestamp.tzinfo is not None
+    assert fetched[0].timestamp.utcoffset() == timedelta(hours=0)
+    # The wall-clock value is preserved as a UTC instant.
+    assert fetched[0].timestamp.hour == 10
+
+
+def test_demo_records_are_tagged_simulation_and_never_live(tmp_db_path):
+    """Demonstration data written through the dataset service is tagged
+    source=simulation and is distinguishable from live host telemetry."""
+    from src.data.dataset_service import HistoricalDatasetService
+    from src.data.dataset import HistoricalDatasetBuilder
+    from src.data.ingestion import TelemetryIngestionService
+
+    storage = SQLiteStorage(tmp_db_path)
+    ingestion = TelemetryIngestionService(storage)
+    service = HistoricalDatasetService(
+        HistoricalDatasetBuilder(), ingestion
+    )
+    service.build_and_persist(start_time=datetime(2026, 1, 1))
+
+    metrics = storage.get_metrics()
+    assert metrics, "demo metrics should be persisted"
+    assert all(m.source == SOURCE_SIMULATION for m in metrics)
+    # A source-aware read for real host telemetry finds no demo records.
+    assert storage.get_metrics(source=SOURCE_WINDOWS_LOCAL) == []
+
+
+# ---------------------------------------------------------------------------
+# Dashboard-optimized reads
+# ---------------------------------------------------------------------------
+
+
+def test_get_latest_metrics_returns_the_newest_per_metric_name(tmp_db_path):
+    storage = SQLiteStorage(tmp_db_path)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    storage.save_metric(
+        Metric(
+            timestamp=base,
+            service="svc",
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=10.0,
+            unit="percent",
+            source=SOURCE_WINDOWS_LOCAL,
+            host_id="host-1",
+        )
+    )
+    storage.save_metric(
+        Metric(
+            timestamp=base + timedelta(minutes=5),
+            service="svc",
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=20.0,
+            unit="percent",
+            source=SOURCE_WINDOWS_LOCAL,
+            host_id="host-1",
+        )
+    )
+    storage.save_metric(
+        Metric(
+            timestamp=base + timedelta(minutes=1),
+            service="svc",
+            environment=Environment.PRODUCTION,
+            metric_name="memory_percent",
+            value=30.0,
+            unit="percent",
+            source=SOURCE_WINDOWS_LOCAL,
+            host_id="host-1",
+        )
+    )
+
+    latest = {m.metric_name: m for m in storage.get_latest_metrics()}
+    assert set(latest) == {"cpu_percent", "memory_percent"}
+    assert latest["cpu_percent"].value == 20.0
+    assert latest["memory_percent"].value == 30.0
+
+
+def test_get_latest_metrics_respects_source_and_host(tmp_db_path):
+    storage = SQLiteStorage(tmp_db_path)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    storage.save_metric(
+        Metric(
+            timestamp=now,
+            service="svc",
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=1.0,
+            unit="percent",
+            source=SOURCE_SIMULATION,
+            host_id="sim-host",
+        )
+    )
+    storage.save_metric(
+        Metric(
+            timestamp=now,
+            service="svc",
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=2.0,
+            unit="percent",
+            source=SOURCE_WINDOWS_LOCAL,
+            host_id="live-host",
+        )
+    )
+    latest = storage.get_latest_metrics(source=SOURCE_WINDOWS_LOCAL)
+    assert len(latest) == 1
+    assert latest[0].value == 2.0
+
+
+def test_count_records_filters_by_source(tmp_db_path):
+    storage = SQLiteStorage(tmp_db_path)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    storage.save_metric(
+        Metric(
+            timestamp=now,
+            service="svc",
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=1.0,
+            unit="percent",
+            source=SOURCE_WINDOWS_LOCAL,
+            host_id="host-1",
+        )
+    )
+    storage.save_metric(
+        Metric(
+            timestamp=now,
+            service="svc",
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=2.0,
+            unit="percent",
+            source=SOURCE_SIMULATION,
+            host_id="sim-host",
+        )
+    )
+    live = storage.count_records(source=SOURCE_WINDOWS_LOCAL)
+    assert live["metrics"] == 1
+    assert storage.count_records()["metrics"] == 2
+
+
+def test_list_sources_and_hosts(tmp_db_path):
+    storage = SQLiteStorage(tmp_db_path)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for source, host in (
+        (SOURCE_WINDOWS_LOCAL, "host-1"),
+        (SOURCE_SIMULATION, "sim-host"),
+    ):
+        storage.save_metric(
+            Metric(
+                timestamp=now,
+                service="svc",
+                environment=Environment.PRODUCTION,
+                metric_name="cpu_percent",
+                value=1.0,
+                unit="percent",
+                source=source,
+                host_id=host,
+            )
+        )
+    assert storage.list_sources() == [SOURCE_SIMULATION, SOURCE_WINDOWS_LOCAL]
+    assert storage.list_hosts(source=SOURCE_WINDOWS_LOCAL) == ["host-1"]
+
+
+def test_latest_observation_returns_the_newest_timestamp(tmp_db_path):
+    storage = SQLiteStorage(tmp_db_path)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for offset in (0, 5, 2):
+        storage.save_metric(
+            Metric(
+                timestamp=base + timedelta(minutes=offset),
+                service="svc",
+                environment=Environment.PRODUCTION,
+                metric_name="cpu_percent",
+                value=1.0,
+                unit="percent",
+                source=SOURCE_WINDOWS_LOCAL,
+                host_id="host-1",
+            )
+        )
+    latest = storage.latest_observation(source=SOURCE_WINDOWS_LOCAL)
+    assert latest == base + timedelta(minutes=5)
+
+
+def test_unknown_source_filter_matches_legacy_null_sources(tmp_db_path):
+    """Legacy records with a NULL source are classified as 'unknown' and
+    must be reachable through the 'unknown' source filter."""
+    storage = SQLiteStorage(tmp_db_path)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    storage.save_metric(
+        Metric(
+            timestamp=now,
+            service="legacy-host",
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=1.0,
+            unit="percent",
+            host_id="legacy-host",
+        )
+    )
+    storage.save_metric(
+        Metric(
+            timestamp=now,
+            service="live-host",
+            environment=Environment.PRODUCTION,
+            metric_name="cpu_percent",
+            value=2.0,
+            unit="percent",
+            source=SOURCE_WINDOWS_LOCAL,
+            host_id="live-host",
+        )
+    )
+
+    unknown = storage.get_metrics(source="unknown")
+    assert len(unknown) == 1
+    assert unknown[0].source is None
+    assert storage.count_records(source="unknown")["metrics"] == 1
+    assert storage.list_hosts(source="unknown") == ["legacy-host"]
+    assert storage.latest_observation(source="unknown") is not None
+    # A real source never matches the unknown bucket.
+    assert storage.get_metrics(source=SOURCE_WINDOWS_LOCAL)[0].host_id == (
+        "live-host"
+    )

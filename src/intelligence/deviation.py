@@ -43,6 +43,8 @@ class DeviationDetector:
                 key=key,
                 value=observation.value,
                 status=DeviationStatus.INSUFFICIENT_REFERENCE,
+                source=observation.source,
+                host_id=observation.host_id,
             )
 
         assert baseline is not None
@@ -73,6 +75,8 @@ class DeviationDetector:
             relative_deviation=relative_deviation,
             z_score=z_score,
             status=status,
+            source=observation.source,
+            host_id=observation.host_id,
         )
 
     def detect_series(

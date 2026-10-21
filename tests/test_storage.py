@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from tests.conftest import requires_supabase
+
 from src.data.schemas import (
     Deployment,
     DeploymentStatus,
@@ -19,6 +21,11 @@ from src.data.schemas import (
 )
 from src.data.supabase_client import get_supabase_client
 from src.data.supabase_storage import SupabaseStorage
+
+# Every test in this module is a live integration test against a reachable
+# Supabase project. The marker skips them (with an explicit reason) when the
+# credentials are not configured; the assertions are unchanged.
+pytestmark = requires_supabase
 
 
 def create_storage() -> SupabaseStorage:

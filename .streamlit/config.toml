@@ -1,0 +1,30 @@
+# Streamlit configuration for RESON.
+#
+# Safe to commit: it contains no secrets. Secrets belong in the hosting
+# platform's secret store (or a local `.env` that is never committed).
+
+[server]
+# The application must run without an interactive browser on a hosting
+# platform, so headless mode is required.
+headless = true
+# Bound the upload size; RESON does not need large uploads.
+maxUploadSize = 5
+
+[browser]
+# Do not send usage statistics to Streamlit from a hosted deployment.
+gatherUsageStats = false
+
+[theme]
+# The dashboard ships its own Obsidian design system (app/theme.py); these
+# values only affect Streamlit's own widgets.
+base = "dark"
+primaryColor = "#00E5FF"
+backgroundColor = "#0B0F17"
+secondaryBackgroundColor = "#111827"
+textColor = "#F8FAFC"
+font = "sans serif"
+
+[runner]
+# Collectors run in their own background thread and are stopped explicitly;
+# this keeps a rerun from tearing down a running collection loop.
+fastReruns = true

@@ -51,6 +51,7 @@ from __future__ import annotations
 from typing import Iterable, Sequence
 
 from src.data.schemas import Deployment, DeploymentStatus, Event, EvidenceType, Log, RelationshipType
+from src.incidents.evidence import dominant_provenance
 from src.intelligence.change_detection import ChangePoint
 from src.intelligence.models import BaselineKey, MetricDeviation
 from src.incidents.models import (
@@ -137,6 +138,8 @@ class SignalBuilder:
                     trigger=deviation.is_anomalous,
                     related_keys=[key],
                     source_record_ids=[deviation.record_id],
+                    source=deviation.source,
+                    host_id=deviation.host_id,
                     payload={
                         "metric_name": key.metric_name,
                         "value": deviation.value,
@@ -171,6 +174,8 @@ class SignalBuilder:
                     sustained=True,
                     related_keys=list(point.affected_metric_keys),
                     source_record_ids=list(point.source_record_ids),
+                    source=point.source,
+                    host_id=point.host_id,
                     payload={
                         "consecutive_batches": point.consecutive_batches,
                         "end_time": point.end_time.isoformat(),
@@ -193,6 +198,8 @@ class SignalBuilder:
                     strength=0.8,
                     trigger=True,
                     source_record_ids=[log.id],
+                    source=getattr(log, "source", None),
+                    host_id=getattr(log, "host_id", None),
                     payload={
                         "level": level,
                         "message": log.message,
@@ -218,6 +225,8 @@ class SignalBuilder:
                     strength=1.0 if event_type in ESCALATION_EVENT_TYPES else 0.5,
                     trigger=event_type in ESCALATION_EVENT_TYPES,
                     source_record_ids=[event.id],
+                    source=getattr(event, "source", None),
+                    host_id=getattr(event, "host_id", None),
                     payload={
                         "event_type": event_type,
                         "description": event.description,
@@ -244,6 +253,8 @@ class SignalBuilder:
                     strength=1.0 if failed else 0.5,
                     trigger=failed,
                     source_record_ids=[deployment.id],
+                    source=getattr(deployment, "source", None),
+                    host_id=getattr(deployment, "host_id", None),
                     payload={
                         "version": deployment.version,
                         "status": (
@@ -515,6 +526,11 @@ class CorrelationEngine:
             f"Service relationship: {candidate.service_relationship}; "
             f"environment relationship: {candidate.environment_relationship}."
         )
+        #: The edge inherits the provenance of the signals it links. It is
+        #: left unattributed when the two signals disagree on their source.
+        edge_source, edge_host = dominant_provenance(
+            [candidate.source, candidate.target]
+        )
         return Evidence(
             id=content_id(
                 "evidence",
@@ -531,6 +547,8 @@ class CorrelationEngine:
             timestamp=candidate.timestamp,
             strength=candidate.strength,
             explanation=explanation,
+            source=edge_source,
+            host_id=edge_host,
         )
 
 

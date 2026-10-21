@@ -38,6 +38,14 @@ section[data-testid="stSidebar"] .stSelectbox label {
     padding: 0.75rem 1rem;
     margin-bottom: 1rem;
 }
+.reson-mode-banner {
+    border-left: 3px solid #00E5FF;
+}
+.reson-mode-banner .reson-live.sim { border-left: none; }
+.reson-empty {
+    color: #94A3B8;
+    font-size: 0.85rem;
+}
 .reson-card {
     background-color: #161F30;
     border: 1px solid #22324D;

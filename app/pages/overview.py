@@ -1,13 +1,19 @@
-"""Operations Overview page: real counts, real analysis, honest empty states."""
+"""Operations Overview page: real counts, real analysis, honest empty states.
+
+Every figure on this page is derived from the telemetry source selected by the
+current monitoring mode. Demonstration data and live host telemetry are never
+combined into a single headline number without saying so.
+"""
 
 import altair as alt
 import pandas as pd
 import streamlit as st
 
+from datetime import datetime, timedelta, timezone
+
 from app import theme as th
 from app.components import ui
 from app.services import backend as svc
-from src.data.windows_collector import CollectorState
 
 
 def _severity_counts(incidents) -> dict[str, int]:
@@ -19,104 +25,119 @@ def _severity_counts(incidents) -> dict[str, int]:
     return counts
 
 
-def _activity_frame(incidents) -> pd.DataFrame:
-    """Bucket incidents by start hour from real stored records."""
+def _activity_frame(incidents, ctx) -> pd.DataFrame:
+    """Bucket incidents by start hour from real stored records.
+
+    Hours are bucketed in the *display* timezone, so the bucket boundaries
+    match the clock the reader sees.
+    """
     if not incidents:
         return pd.DataFrame(columns=["hour", "incidents"])
     frame = pd.DataFrame(
-        {"hour": [i.start_time for i in incidents]}
+        {"hour": [ctx.to_chart_time(i.start_time) for i in incidents]}
     ).assign(hour=lambda d: d["hour"].dt.floor("h"))
     grouped = frame.groupby("hour").size().reset_index(name="incidents")
     return grouped.sort_values("hour")
 
 
-def _service_rows(storage, demo):
-    """Derive per-service telemetry rows from stored metrics (real data)."""
-    metrics = storage.get_metrics()
-    by_service: dict[str, int] = {}
-    for metric in metrics:
-        by_service[metric.service] = by_service.get(metric.service, 0) + 1
-    changed = set(demo.analysis.changed_services) if (
-        demo is not None and demo.analysis is not None
-    ) else set()
-    return sorted(by_service.items()), changed
+def _percent(value) -> str:
+    return "—" if value is None else f"{value:.1f}%"
 
 
-def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
+def _bytes(value) -> str:
+    if value is None:
+        return "—"
+    size = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(size) < 1024.0 or unit == "TiB":
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+    return f"{size:.1f} TiB"
+
+
+def render(ctx, live: dict | None = None) -> None:
+    """Render the operations overview for the active monitoring mode."""
     ui.page_header(
         "Fleet observability / incident overview",
         "System Operations &amp; Incident Pulse",
         "Deterministic incident intelligence over stored telemetry. Every "
-        "figure below comes from the selected backend or the current session "
-        "analysis — never invented.",
+        "figure below comes from the selected backend and the active data "
+        "source — never invented, and never mixed across sources.",
     )
 
-    live = live or {}
-    collector = live.get("collector")
+    ui.mode_banner(
+        mode_label=ctx.mode.label,
+        description=ctx.mode.description,
+        available=ctx.mode.available,
+        reason=ctx.mode.unavailable_reason,
+        detail=ctx.mode.detail or None,
+        simulated=ctx.simulated,
+    )
+
+    storage = ctx.storage
+    source = ctx.source
 
     # ------------------------------------------------------------------
-    # Live observations (real Windows telemetry)
+    # Collector / pipeline status (derived, never a session flag)
     # ------------------------------------------------------------------
-    if collector is not None:
+    status = ctx.status
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        ui.metric_card(
+            "Pipeline status",
+            status.label,
+            sub=status.detail,
+            badge="LIVE" if ctx.live else "NOT LIVE",
+            accent=None if ctx.live else "reson-accent-high",
+        )
+    with c2:
+        age = status.age_seconds
+        ui.metric_card(
+            "Telemetry freshness",
+            "—" if age is None else f"{age:.0f}s",
+            sub=(
+                "since last observation"
+                if age is not None
+                else "no observation recorded"
+            ),
+            badge="FRESH" if (age is not None and age <= 120) else "STALE",
+        )
+    with c3:
+        latest = (
+            ctx.format_timestamp(status.last_observation)
+            if status.last_observation is not None
+            else "never"
+        )
+        ui.metric_card(
+            "Last observation",
+            latest,
+            sub=f"source: {source or 'all'}",
+        )
+    with c4:
+        ui.metric_card(
+            "Monitored hosts",
+            str(len(ctx.hosts)),
+            sub="hosts with data in this source",
+            badge=ctx.mode.label.upper(),
+        )
+
+    if not ctx.mode.available:
         with st.container(border=True):
             ui.panel_header(
-                "Live observations — real Windows telemetry",
-                f"Source: windows_local · host: {collector.host_id} · "
-                f"ingesting into the selected ({backend_name}) backend",
+                "Nothing to display for this mode",
+                ctx.mode.unavailable_reason or "No data is available.",
             )
-            host = collector.last_host_measurement
-            state_tone = (
-                "chip-critical"
-                if collector.state == CollectorState.ERROR
-                else "chip-low"
+            st.markdown(
+                "The dashboard will not substitute another mode's data for "
+                "this one. Change the monitoring mode in the sidebar, start "
+                "the local collector, or run the demonstration analysis."
             )
-            c1, c2, c3, c4 = st.columns(4)
-            with c1:
-                ui.metric_card(
-                    "Collector",
-                    collector.state.value.upper(),
-                    trend_dir="ok" if collector.state == CollectorState.RUNNING else "down",
-                )
-                st.markdown(
-                    f"<span class='reson-sub'>{th.chip(collector.state.value.upper(), state_tone)}</span>",
-                    unsafe_allow_html=True,
-                )
-            with c2:
-                ui.metric_card(
-                    "CPU",
-                    f"{host.cpu_percent:.1f}%" if host and host.cpu_percent is not None else "—",
-                    sub="host utilization, percent",
-                )
-            with c3:
-                ui.metric_card(
-                    "Memory",
-                    f"{host.memory_percent:.1f}%" if host and host.memory_percent is not None else "—",
-                    sub="physical memory utilization, percent",
-                )
-            with c4:
-                last = (
-                    host.timestamp.strftime("%H:%M:%S UTC")
-                    if host is not None
-                    else "never"
-                )
-                ui.metric_card(
-                    "Last sample",
-                    last,
-                    sub="UTC observation timestamp",
-                )
-            if collector.last_error:
-                st.error(f"Collection error: {collector.last_error}")
-            procs = collector.last_process_measurements
-            if procs:
-                st.markdown(
-                    f"<span class='reson-sub'>"
-                    f"{len(procs)} process(es) observed in the last cycle"
-                    "</span>",
-                    unsafe_allow_html=True,
-                )
 
-    counts = svc.storage_counts(storage)
-    incidents = svc.ordered_incidents(storage)
+    counts = svc.storage_counts(storage, source=source)
+    backend_total = sum(
+        item.total for item in ctx.sources
+    )
+    incidents = svc.ordered_incidents(storage, source=source)
     active = [
         i
         for i in incidents
@@ -124,7 +145,6 @@ def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
     ]
     severities = _severity_counts(incidents)
     critical_high = severities["critical"] + severities["high"]
-
     total = (
         counts["metrics"]
         + counts["logs"]
@@ -132,9 +152,61 @@ def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
         + counts["deployments"]
     )
 
-    # KPI bar ------------------------------------------------------------
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
+    # ------------------------------------------------------------------
+    # Resource snapshot (real stored values for this source)
+    # ------------------------------------------------------------------
+    latest_metrics = svc.latest_metric_values(
+        storage, source=source, host_id=ctx.host_id
+    )
+    cpu = latest_metrics.get("cpu_percent")
+    memory = latest_metrics.get("memory_percent")
+    memory_total = latest_metrics.get("memory_total_bytes")
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        ui.metric_card(
+            "CPU utilization",
+            _percent(cpu.value if cpu else None),
+            sub="host CPU, percent of all logical cores",
+            badge="PERCENT" if cpu else "UNAVAILABLE",
+        )
+    with c2:
+        ui.metric_card(
+            "Memory utilization",
+            _percent(memory.value if memory else None),
+            sub=f"total {_bytes(memory_total.value) if memory_total else '—'}",
+            badge="PERCENT" if memory else "UNAVAILABLE",
+        )
+    with c3:
+        disk_metrics = [
+            m
+            for name, m in latest_metrics.items()
+            if name.startswith("disk_")
+        ]
+        ui.metric_card(
+            "Disk capacity",
+            "—",
+            sub="per-volume detail on System Resources",
+            badge="SEE DETAIL" if disk_metrics else "NOT COLLECTED",
+        )
+    with c4:
+        net_metrics = [
+            m
+            for name, m in latest_metrics.items()
+            if name.startswith("network_")
+        ]
+        ui.metric_card(
+            "Network throughput",
+            "—",
+            sub="per-interface detail on System Resources",
+            badge="SEE DETAIL" if net_metrics else "NOT COLLECTED",
+        )
+
+    # ------------------------------------------------------------------
+    # KPI bar
+    # ------------------------------------------------------------------
+    k1, k2, k3, k4 = st.columns(4)
+    with k1:
         ui.metric_card(
             "Active incidents",
             str(len(active)),
@@ -143,69 +215,165 @@ def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
             trend_dir="up" if active else "ok",
             accent="reson-accent-critical" if critical_high else None,
         )
-    with col2:
+    with k2:
+        demo = ctx.demo
         if demo is not None and demo.analysis is not None:
             score = demo.analysis.overall_score
             changed = ", ".join(demo.analysis.changed_services) or "none"
-            sparks = [
-                r.shift.score for r in demo.analysis.service_results
-            ]
             ui.metric_card(
                 "Behavior shift",
                 f"{score:.3f}",
                 sub=f"changed: {changed}",
                 badge="ELEVATED" if score >= 0.5 else "STEADY",
-                spark=sparks or None,
+                spark=[
+                    r.shift.score for r in demo.analysis.service_results
+                ]
+                or None,
             )
         else:
             ui.metric_card(
                 "Behavior shift",
                 "—",
-                sub="analysis not yet run",
+                sub="no analysis in the current session",
                 badge="NO DATA",
             )
-    with col3:
+    with k3:
         ui.metric_card(
             "Telemetry volume",
             f"{total:,}",
             sub=(
                 f"{counts['metrics']:,} metrics · {counts['logs']:,} logs · "
-                f"{counts['events']:,} events · {counts['deployments']:,} deployments"
+                f"{counts['events']:,} events · "
+                f"{counts['deployments']:,} deployments"
             ),
-            badge=f"{counts['services']} services",
+            badge=f"source: {source or 'all'}",
         )
-    with col4:
+    with k4:
+        combined = sum(item.total for item in ctx.sources)
+        shown = sum(
+            item.total
+            for item in ctx.sources
+            if source is None or item.source == source
+        )
         ui.metric_card(
-            "Data source",
-            backend_name,
-            sub=f"{counts['services']} services observed"
-            + (" · SIMULATED telemetry" if demo is not None else ""),
-            badge="SIMULATED" if demo is not None else "STORED",
+            "Scope",
+            f"{shown:,}",
+            sub=(
+                f"of {combined:,} records across all sources"
+                if combined > shown
+                else "records in the selected source"
+            ),
+            badge=("COMBINED" if combined > shown else "FILTERED"),
         )
 
     if total == 0:
         with st.container(border=True):
+            if backend_total == 0:
+                ui.panel_header(
+                    "First run — storage is empty",
+                    "No telemetry is stored in the selected backend.",
+                )
+                st.markdown(
+                    "Start the local collector to collect real telemetry, or "
+                    "run the local demonstration analysis from the sidebar. "
+                    "RESON never substitutes synthetic data for missing live "
+                    "data."
+                )
+            else:
+                ui.panel_header(
+                    "No telemetry in this source",
+                    f"The backend holds no records with source '{source}'.",
+                )
+                st.markdown(
+                    "Other sources are present in this backend. Switch the "
+                    "monitoring mode in the sidebar to view them, or start "
+                    "the local collector to produce live telemetry for this "
+                    "source."
+                )
+
+    # ------------------------------------------------------------------
+    # Historical trend
+    # ------------------------------------------------------------------
+    # The overview shows a bounded window so page load time does not grow
+    # with the retained history. The System Resources page offers longer
+    # windows for deeper analysis.
+    trend_window_hours = 24
+    trend_start = datetime.now(timezone.utc) - timedelta(hours=trend_window_hours)
+    series = svc.metric_series(
+        storage,
+        source=source,
+        host_id=ctx.host_id,
+        metric_names=("cpu_percent", "memory_percent"),
+        start=trend_start,
+    )
+    trend_points = []
+    for name, points in series.items():
+        for timestamp, value in points:
+            trend_points.append(
+                {
+                    "time": ctx.to_chart_time(timestamp),
+                    "metric": name,
+                    "value": value,
+                }
+            )
+    if trend_points:
+        frame = pd.DataFrame(trend_points)
+        chart = (
+            alt.Chart(frame)
+            .mark_line(strokeWidth=1.8)
+            .encode(
+                x=alt.X("time:T", title=ctx.chart_axis_title()),
+                y=alt.Y("value:Q", title="Percent"),
+                color=alt.Color(
+                    "metric:N",
+                    scale=alt.Scale(
+                        domain=["cpu_percent", "memory_percent"],
+                        range=["#00E5FF", "#F59E0B"],
+                    ),
+                ),
+                tooltip=[
+                    alt.Tooltip("time:T", title="Time", format="%Y-%m-%d %H:%M:%S"),
+                    alt.Tooltip("metric:N", title="Metric"),
+                    alt.Tooltip("value:Q", title="Value", format=".2f"),
+                ],
+            )
+            .properties(height=220)
+        )
+        with st.container(border=True):
             ui.panel_header(
-                "First run — storage is empty",
-                "No telemetry is stored in the selected backend.",
+                "Resource trend",
+                f"CPU and memory over the last {trend_window_hours} hours "
+                f"(source: {source or 'all'})",
+            )
+            st.altair_chart(ui.darken(chart), width="stretch")
+            st.caption(
+                "This overview shows a bounded window so it stays fast. Use "
+                "**System Resources** for longer ranges and sampling-gap "
+                "analysis."
+            )
+    else:
+        with st.container(border=True):
+            ui.panel_header(
+                "Resource trend",
+                f"No samples in the last {trend_window_hours} hours",
             )
             st.markdown(
-                "Use **Run Local Demonstration Analysis** in the sidebar to "
-                "generate deterministic simulated telemetry and execute the "
-                "real ingestion and intelligence pipeline. Simulated telemetry "
-                "is always labeled."
+                "No CPU or memory samples are stored for this source in the "
+                "displayed window."
             )
-        return
 
-    # Incident activity + severity distribution --------------------------
+    # ------------------------------------------------------------------
+    # Incident activity + severity distribution
+    # ------------------------------------------------------------------
     left, right = st.columns([8, 4])
     with left:
         with st.container(border=True):
             ui.panel_header(
                 "Incident activity over time",
-                "Stored incidents bucketed by start hour (UTC)",
+                "Stored incidents bucketed by start hour "
+                f"({ctx.timezone_name} local)",
             )
-            frame = _activity_frame(incidents)
+            frame = _activity_frame(incidents, ctx)
             if frame.empty:
                 st.markdown(
                     "No incidents stored. Zero is a valid analytical result."
@@ -217,7 +385,7 @@ def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
                     .encode(
                         x=alt.X(
                             "hour:T",
-                            title="Start hour (UTC)",
+                            title=f"Start hour ({ctx.timezone_name})",
                             axis=alt.Axis(format="%m-%d %H:%M"),
                         ),
                         y=alt.Y(
@@ -226,15 +394,15 @@ def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
                             axis=alt.Axis(format="d"),
                         ),
                         tooltip=[
-                            alt.Tooltip("hour:T", title="Hour", format="%Y-%m-%d %H:%M"),
+                            alt.Tooltip(
+                                "hour:T", title="Hour", format="%Y-%m-%d %H:%M"
+                            ),
                             alt.Tooltip("incidents:Q", title="Incidents"),
                         ],
                     )
                     .properties(height=220)
                 )
-                st.altair_chart(
-                    ui.darken(chart), width="stretch"
-                )
+                st.altair_chart(ui.darken(chart), width="stretch")
     with right:
         with st.container(border=True):
             ui.panel_header("Severity distribution", "All stored incidents")
@@ -275,11 +443,11 @@ def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
                     )
                     .properties(height=140)
                 )
-                st.altair_chart(
-                    ui.darken(chart), width="stretch"
-                )
+                st.altair_chart(ui.darken(chart), width="stretch")
 
-    # Registry + service mesh + shift stream -----------------------------
+    # ------------------------------------------------------------------
+    # Registry + recent events
+    # ------------------------------------------------------------------
     left, right = st.columns([8, 4])
     with left:
         with st.container(border=True):
@@ -288,11 +456,11 @@ def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
                 f"{len(incidents)} logged · {len(active)} active",
             )
             if not incidents:
-                if demo is not None:
+                if ctx.demo is not None:
                     st.markdown(
                         "Analysis complete — **no incidents detected** in this "
-                        "window. Zero is a valid result: no trigger evidence met "
-                        "the correlation policy."
+                        "window. Zero is a valid result: no trigger evidence "
+                        "met the correlation policy."
                     )
                 else:
                     st.markdown(
@@ -307,140 +475,138 @@ def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
                         title=incident.title,
                         status=incident.status,
                         meta=(
-                            f"{incident.start_time.strftime('%Y-%m-%d %H:%M:%S')} UTC"
+                            f"{ctx.format_timestamp(incident.start_time)}"
                             f" · {', '.join(incident.affected_services) or '—'}"
                         ),
                     )
     with right:
         with st.container(border=True):
-            ui.panel_header("Service mesh health", "From stored telemetry")
-            rows, changed = _service_rows(storage, demo)
-            if not rows:
-                st.markdown("No services observed.")
+            ui.panel_header(
+                "Recent events",
+                f"Events stored with source '{source}'",
+            )
+            events = svc.recent_events(storage, source=source, limit=12)
+            if not events:
+                st.markdown("No events stored for this source.")
             else:
-                for service, metric_count in rows:
-                    degraded = service in changed
-                    ui.mesh_row(
-                        service,
-                        f"{metric_count:,} observations",
-                        "DEGRADED" if degraded else "NOMINAL",
-                        "chip-critical" if degraded else "chip-low",
+                for event in events:
+                    ui.stream_item(
+                        ctx.format_timestamp(
+                            event.timestamp, fmt="%m-%d %H:%M:%S"
+                        ),
+                        str(
+                            getattr(event.event_type, "value", event.event_type)
+                        ),
+                        event.description,
+                        "chip-corr",
                     )
 
-    # Session evidence ---------------------------------------------------
-    if demo is not None and demo.incident_result is not None:
-        result = demo.incident_result
-        anomalous = [d for d in demo.deviations if d.is_anomalous]
+    # ------------------------------------------------------------------
+    # Live collector detail (only meaningful in local mode)
+    # ------------------------------------------------------------------
+    collector = ctx.collector
+    if collector is not None and live is not None:
         with st.container(border=True):
             ui.panel_header(
-                "Behavior shift stream",
-                "Real deviations and change points from the session analysis",
+                "Live collector",
+                f"Source: {collector.source} · host: {collector.host_id} · "
+                f"ingesting into the selected ({ctx.backend_name}) backend",
             )
+            health = collector.health()
             c1, c2, c3, c4 = st.columns(4)
-            c1.markdown(
-                f'<div class="reson-sub">Anomalous deviations</div>'
-                f'<div class="reson-mono">{len(anomalous)}</div>',
-                unsafe_allow_html=True,
+            with c1:
+                ui.metric_card(
+                    "Collector state",
+                    health.state.upper(),
+                    sub=(
+                        f"{health.sample_count} sample(s) · "
+                        f"{health.error_count} error(s)"
+                    ),
+                    badge="RUNNING" if health.running else "STOPPED",
+                )
+            with c2:
+                host = collector.last_host_measurement
+                ui.metric_card(
+                    "CPU",
+                    (
+                        f"{host.cpu_percent:.1f}%"
+                        if host is not None and host.cpu_percent is not None
+                        else "—"
+                    ),
+                    sub="in-process sample",
+                )
+            with c3:
+                host = collector.last_host_measurement
+                ui.metric_card(
+                    "Memory",
+                    (
+                        f"{host.memory_percent:.1f}%"
+                        if host is not None and host.memory_percent is not None
+                        else "—"
+                    ),
+                    sub="in-process sample",
+                )
+            with c4:
+                ui.metric_card(
+                    "Processes observed",
+                    str(len(collector.last_process_measurements)),
+                    sub="in the last collection cycle",
+                )
+            if health.last_error:
+                st.error(f"Collection error: {health.last_error}")
+            st.caption(
+                "Capabilities reported by this platform collector: "
+                + ", ".join(
+                    f"{name}={'yes' if value else 'no'}"
+                    for name, value in sorted(health.capabilities.items())
+                )
             )
-            c2.markdown(
-                f'<div class="reson-sub">Change points</div>'
-                f'<div class="reson-mono">{len(demo.change_points)}</div>',
-                unsafe_allow_html=True,
-            )
-            c3.markdown(
-                f'<div class="reson-sub">Accepted correlations</div>'
-                f'<div class="reson-mono">{len(result.correlation_evidence)}</div>',
-                unsafe_allow_html=True,
-            )
-            c4.markdown(
-                f'<div class="reson-sub">Pairs evaluated</div>'
-                f'<div class="reson-mono">{len(result.correlation_candidates)}</div>',
-                unsafe_allow_html=True,
-            )
-            if anomalous:
-                top = sorted(
-                    anomalous,
-                    key=lambda d: abs(d.z_score or 0.0),
-                    reverse=True,
-                )[:5]
-                for deviation in top:
-                    z = deviation.z_score
-                    tone = "chip-critical" if abs(z or 0) >= 4 else "chip-high"
-                    ui.stream_item(
-                        deviation.timestamp.strftime("%H:%M:%S"),
-                        deviation.key.service,
-                        f"<span class='reson-mono'>{deviation.key.metric_name}</span> "
-                        f"deviated to {deviation.value:.3f} "
-                        f"(z={z:.2f})" if z is not None else
-                        f"<span class='reson-mono'>{deviation.key.metric_name}</span> "
-                        f"deviated to {deviation.value:.3f}",
-                        tone,
-                    )
 
-    # ------------------------------------------------------------------
-    # Baseline readiness and historical comparison (live observations)
-    # ------------------------------------------------------------------
-    if live:
-        host_id = collector.host_id if collector else None
-        if host_id:
-            readiness = live.get("readiness", {})
-            if readiness:
-                with st.container(border=True):
-                    ui.panel_header(
-                        "Baseline readiness",
-                        "Evidence-based readiness, per stored metric identity",
-                    )
-                    rows = [
-                        {
-                            "Metric": f"{key.service} / {key.metric_name}",
-                            "Readiness": str(
-                                getattr(state, "value", state)
-                            ),
-                            "Historical samples": live.get(
-                                "historical_sample_counts", {}
-                            ).get(key, 0),
-                        }
-                        for key, state in sorted(readiness.items())
-                    ]
-                    st.dataframe(rows, width="stretch", hide_index=True)
-                    st.caption(
-                        "READY = enough samples for a baseline. "
-                        "INSUFFICIENT_DATA = collecting, not enough yet. "
-                        "UNAVAILABLE = no observations. STALE = baseline "
-                        "predates the current period."
-                    )
+        readiness = live.get("readiness", {})
+        if readiness:
+            with st.container(border=True):
+                ui.panel_header(
+                    "Baseline readiness",
+                    "Evidence-based readiness, per stored metric identity",
+                )
+                rows = [
+                    {
+                        "Metric": f"{key.service} / {key.metric_name}",
+                        "Readiness": str(getattr(state, "value", state)),
+                    }
+                    for key, state in sorted(readiness.items())
+                ]
+                st.dataframe(rows, width="stretch", hide_index=True)
+                st.caption(
+                    "READY = enough samples for a baseline. "
+                    "INSUFFICIENT_DATA = collecting, not enough yet. "
+                    "UNAVAILABLE = no observations. STALE = baseline "
+                    "predates the current period."
+                )
 
         comparison = live.get("comparison")
         comparison_error = live.get("comparison_error")
         with st.container(border=True):
             ui.panel_header(
-                "Historical comparison — today vs prior day (UTC)",
+                "Historical comparison — today vs prior day (UTC calendar days)",
                 "Real observation windows compared through the existing "
-                "intelligence engine; missing history is reported, not faked.",
+                "intelligence engine; missing history is reported, not faked. "
+                "The comparison windows are UTC calendar days; individual "
+                f"timestamps are shown in {ctx.timezone_name} local time.",
             )
             if comparison_error:
                 st.error(f"Comparison unavailable: {comparison_error}")
             elif comparison is None:
                 ui.empty_state(
                     "No host selected",
-                    "Start real Windows observation to enable "
-                    "today-vs-prior-day comparison.",
+                    "Start local observation to enable today-vs-prior-day "
+                    "comparison.",
                 )
             elif not comparison.sufficient:
                 st.info(
                     "Cross-day comparison unavailable: "
                     + "; ".join(comparison.reasons)
                 )
-                if comparison.incompatible_units:
-                    st.markdown(
-                        "Units disagree (not compared): "
-                        + ", ".join(comparison.incompatible_units)
-                    )
-                if comparison.missing_metrics:
-                    st.markdown(
-                        "Requested metrics with no data: "
-                        + ", ".join(comparison.missing_metrics)
-                    )
             else:
                 anomalous = [d for d in comparison.deviations if d.is_anomalous]
                 c1, c2, c3 = st.columns(3)
@@ -459,38 +625,3 @@ def render(storage, demo, backend_name: str, live: dict | None = None) -> None:
                     str(len(comparison.change_points)),
                     sub="sustained anomalous runs",
                 )
-                st.markdown(
-                    "<span class='reson-sub'>"
-                    f"Historical window: "
-                    f"{comparison.historical_window[0].strftime('%Y-%m-%d %H:%M UTC')} → "
-                    f"{comparison.historical_window[1].strftime('%Y-%m-%d %H:%M UTC')} · "
-                    f"Current window: "
-                    f"{comparison.current_window[0].strftime('%Y-%m-%d %H:%M UTC')} → "
-                    f"{comparison.current_window[1].strftime('%Y-%m-%d %H:%M UTC')}"
-                    "</span>",
-                    unsafe_allow_html=True,
-                )
-                if comparison.reasons:
-                    st.caption(" | ".join(comparison.reasons))
-                if anomalous:
-                    with st.container(border=True):
-                        ui.panel_header(
-                            "Deviations vs prior-day baseline",
-                            "Correlated evidence, not a confirmed cause.",
-                        )
-                        rows = [
-                            {
-                                "Time (UTC)": d.timestamp.strftime("%H:%M:%S"),
-                                "Metric": d.key.metric_name,
-                                "Value": round(d.value, 3),
-                                "z-score": (
-                                    round(d.z_score, 3)
-                                    if d.z_score is not None
-                                    else "—"
-                                ),
-                            }
-                            for d in sorted(
-                                anomalous, key=lambda d: d.timestamp
-                            )[:10]
-                        ]
-                        st.dataframe(rows, width="stretch", hide_index=True)

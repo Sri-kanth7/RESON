@@ -120,6 +120,58 @@ class TelemetryBase(RESONModel):
 
 
 # ---------------------------------------------------------------------------
+# Source attribution
+# ---------------------------------------------------------------------------
+
+SOURCE_WINDOWS_LOCAL = "windows_local"
+"""Real host telemetry collected on a Windows computer."""
+
+SOURCE_LINUX_LOCAL = "linux_local"
+"""Real host telemetry collected on a Linux computer."""
+
+SOURCE_MACOS_LOCAL = "macos_local"
+"""Real host telemetry collected on a macOS computer."""
+
+SOURCE_HOSTED_COLLECTOR = "hosted_collector"
+"""Telemetry sent to a hosted dashboard by a separately running local collector."""
+
+SOURCE_SIMULATION = "simulation"
+"""Synthetic / generated demonstration telemetry."""
+
+SOURCE_IMPORTED = "imported"
+"""Historical data imported from an external source."""
+
+SOURCE_UNKNOWN = "unknown"
+"""Provenance cannot be established (for example legacy records with no source)."""
+
+
+#: Every source value RESON understands. Used for validation and documentation.
+SOURCE_VALUES = (
+    SOURCE_WINDOWS_LOCAL,
+    SOURCE_LINUX_LOCAL,
+    SOURCE_MACOS_LOCAL,
+    SOURCE_HOSTED_COLLECTOR,
+    SOURCE_SIMULATION,
+    SOURCE_IMPORTED,
+    SOURCE_UNKNOWN,
+)
+
+
+def classify_source(source: str | None) -> str:
+    """Return the reliable source classification for a telemetry record.
+
+    ``None`` and any unrecognized value are classified as
+    :data:`SOURCE_UNKNOWN`. A record is never inferred to be real merely
+    because it carries a plausible timestamp or value.
+    """
+    if source is None:
+        return SOURCE_UNKNOWN
+    if source in SOURCE_VALUES:
+        return source
+    return SOURCE_UNKNOWN
+
+
+# ---------------------------------------------------------------------------
 # System entities
 # ---------------------------------------------------------------------------
 
@@ -159,27 +211,51 @@ class Metric(TelemetryBase):
 
 
 class Log(TelemetryBase):
-    """An application or system log record."""
+    """An application or system log record.
+
+    ``source`` and ``host_id`` identify the telemetry provenance and the
+    computer the record was collected on. Both default to ``None`` so existing
+    simulated and historical records validate unchanged; a ``None`` source is
+    classified as :data:`SOURCE_UNKNOWN` at read/query time.
+    """
 
     level: LogLevel
     message: str = Field(min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = None
+    host_id: str | None = None
 
 
 class Event(TelemetryBase):
-    """A significant system event."""
+    """A significant system event.
+
+    ``source`` and ``host_id`` identify the telemetry provenance and the
+    computer the record was collected on. Both default to ``None`` so existing
+    simulated and historical records validate unchanged; a ``None`` source is
+    classified as :data:`SOURCE_UNKNOWN` at read/query time.
+    """
 
     event_type: EventType
     description: str = Field(min_length=1)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = None
+    host_id: str | None = None
 
 
 class Deployment(TelemetryBase):
-    """A service deployment event."""
+    """A service deployment event.
+
+    ``source`` and ``host_id`` identify the telemetry provenance and the
+    computer the record was collected on. Both default to ``None`` so existing
+    simulated and historical records validate unchanged; a ``None`` source is
+    classified as :data:`SOURCE_UNKNOWN` at read/query time.
+    """
 
     version: str = Field(min_length=1)
     status: DeploymentStatus
     metadata: dict[str, Any] = Field(default_factory=dict)
+    source: str | None = None
+    host_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +264,14 @@ class Deployment(TelemetryBase):
 
 
 class Incident(RESONModel):
-    """A correlated period of abnormal system behavior."""
+    """A correlated period of abnormal system behavior.
+
+    ``source`` records the telemetry source the incident was detected from
+    and ``host_id`` the machine it was detected on, so an incident can be
+    traced back to the provenance of the observations behind it. Both
+    default to ``None`` (classified as :data:`SOURCE_UNKNOWN` at read time)
+    for incidents created before provenance was recorded.
+    """
 
     id: UUID = Field(default_factory=uuid4)
     title: str = Field(min_length=1)
@@ -198,6 +281,8 @@ class Incident(RESONModel):
     status: IncidentStatus
     scenario: str | None = None
     affected_services: list[str] = Field(default_factory=list)
+    source: str | None = None
+    host_id: str | None = None
 
     @property
     def duration_seconds(self) -> float | None:
@@ -215,7 +300,12 @@ class Incident(RESONModel):
 
 
 class Evidence(RESONModel):
-    """A relationship connecting two pieces of system evidence."""
+    """A relationship connecting two pieces of system evidence.
+
+    ``source`` records the telemetry source the supporting observation came
+    from, so an evidence link keeps the provenance of the record it points
+    at. Both default to ``None`` (classified as :data:`SOURCE_UNKNOWN`).
+    """
 
     id: UUID = Field(default_factory=uuid4)
 
@@ -232,3 +322,6 @@ class Evidence(RESONModel):
     strength: float = Field(ge=0.0, le=1.0)
 
     explanation: str = Field(min_length=1)
+
+    source: str | None = None
+    host_id: str | None = None

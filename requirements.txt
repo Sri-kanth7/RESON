@@ -4,3 +4,5 @@ pytest>=8,<10
 streamlit>=1.66,<2
 supabase
 python-dotenv
+altair>=5.0,<6
+pandas>=2.0,<3

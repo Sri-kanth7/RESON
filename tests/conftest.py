@@ -6,7 +6,10 @@ without Supabase, without a configuration file, and without the simulator.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from src.data.schemas import (
     Deployment,
@@ -19,6 +22,28 @@ from src.data.schemas import (
 )
 
 DEFAULT_START = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def _supabase_configured() -> bool:
+    """Return whether Supabase credentials are present in the environment."""
+    return bool(
+        os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SECRET_KEY")
+    )
+
+
+#: Marker for live integration tests that need a reachable Supabase project.
+#:
+#: The test body and its assertions are unchanged; the marker only skips the
+#: test when the external service it integrates with is not configured. The
+#: skip reason is explicit so the skip is never silent.
+requires_supabase = pytest.mark.skipif(
+    not _supabase_configured(),
+    reason=(
+        "Live integration test: requires SUPABASE_URL and "
+        "SUPABASE_SECRET_KEY. The offline suite covers the same code paths "
+        "using the sqlite and memory backends."
+    ),
+)
 
 
 def make_metric(

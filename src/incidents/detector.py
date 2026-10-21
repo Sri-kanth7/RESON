@@ -40,7 +40,7 @@ from uuid import UUID
 
 from src.data.schemas import Evidence, EvidenceType, Incident, IncidentSeverity, IncidentStatus
 from src.incidents.correlation import ESCALATION_EVENT_TYPES, FAILED_DEPLOYMENT_STATUSES
-from src.incidents.evidence import link_incident_signals
+from src.incidents.evidence import dominant_provenance, link_incident_signals
 from src.incidents.models import (
     IncidentIntelligenceConfig,
     Signal,
@@ -227,6 +227,10 @@ class IncidentDetector:
             end = cluster[-1].timestamp
             affected_services = sorted({signal.service for signal in cluster})
             scenario = self._uniform_scenario(cluster)
+            #: The provenance of the observations behind the incident. It is
+            #: recorded only when every supporting signal agrees on it, so an
+            #: incident is never attributed to a source it did not come from.
+            incident_source, incident_host = dominant_provenance(cluster)
 
             incident = Incident(
                 id=content_id(
@@ -243,6 +247,8 @@ class IncidentDetector:
                 status=IncidentStatus.OPEN.value,
                 scenario=scenario,
                 affected_services=affected_services,
+                source=incident_source,
+                host_id=incident_host,
             )
             chain[incident.id] = link_incident_signals(incident.id, cluster)
             severity_notes[incident.id] = severity_explanation

@@ -1,8 +1,11 @@
+from tests.conftest import requires_supabase
+
 from src.data.ingestion import TelemetryIngestionService
 from src.data.supabase_storage import SupabaseStorage
 from src.orchestrator import RESONApplication, create_application
 
 
+@requires_supabase
 def test_create_application():
     application = create_application()
 

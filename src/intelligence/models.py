@@ -66,7 +66,11 @@ class HistoricalBaseline(IntelligenceModel):
 
 
 class MetricDeviation(IntelligenceModel):
-    """Deviation of one observation relative to its historical baseline."""
+    """Deviation of one observation relative to its historical baseline.
+
+    ``source`` and ``host_id`` preserve the provenance of the observation
+    the deviation was computed from.
+    """
 
     record_id: UUID
     timestamp: datetime
@@ -77,6 +81,8 @@ class MetricDeviation(IntelligenceModel):
     relative_deviation: float | None = None
     z_score: float | None = None
     status: DeviationStatus
+    source: str | None = None
+    host_id: str | None = None
 
     @property
     def is_anomalous(self) -> bool:
@@ -85,7 +91,12 @@ class MetricDeviation(IntelligenceModel):
 
 
 class ChangePoint(IntelligenceModel):
-    """A sustained period of anomalous behavior across consecutive batches."""
+    """A sustained period of anomalous behavior across consecutive batches.
+
+    ``source`` and ``host_id`` hold the provenance of the observations the
+    change point was derived from. They are ``None`` when the underlying
+    observations came from more than one source.
+    """
 
     start_time: datetime
     end_time: datetime
@@ -93,6 +104,8 @@ class ChangePoint(IntelligenceModel):
     affected_metric_keys: list[BaselineKey] = Field(default_factory=list)
     source_record_ids: list[UUID] = Field(default_factory=list)
     explanation: str
+    source: str | None = None
+    host_id: str | None = None
 
 
 class MetricBehavior(IntelligenceModel):

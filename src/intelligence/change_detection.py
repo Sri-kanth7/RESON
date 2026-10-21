@@ -127,6 +127,22 @@ class ChangeDetector:
             }
         )
 
+        #: Provenance of the observations behind the change point. When the
+        #: observations come from more than one source the change point is
+        #: left unattributed rather than attributed to an arbitrary source.
+        sources = {
+            deviation.source
+            for evaluation in run
+            for deviation in evaluation.deviations
+            if deviation.is_anomalous and deviation.source is not None
+        }
+        hosts = {
+            deviation.host_id
+            for evaluation in run
+            for deviation in evaluation.deviations
+            if deviation.is_anomalous and deviation.host_id is not None
+        }
+
         change_points.append(
             ChangePoint(
                 start_time=run[0].timestamp,
@@ -140,5 +156,7 @@ class ChangeDetector:
                     f"{run[0].timestamp} to {run[-1].timestamp} involving "
                     f"{affected_keys}."
                 ),
+                source=sources.pop() if len(sources) == 1 else None,
+                host_id=hosts.pop() if len(hosts) == 1 else None,
             )
         )

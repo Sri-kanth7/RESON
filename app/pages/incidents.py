@@ -5,6 +5,7 @@ import streamlit as st
 from app import theme as th
 from app.components import ui
 from app.services import backend as svc
+from src.data.schemas import SOURCE_UNKNOWN, classify_source
 
 
 def _type_chip(target_type: object) -> str:
@@ -27,7 +28,7 @@ def _rel_class(relationship: object) -> str:
     return "corr"
 
 
-def render(storage, demo) -> None:
+def render(ctx) -> None:
     ui.page_header(
         "Incidents / deep evidence investigation",
         "Incident Investigation",
@@ -35,36 +36,57 @@ def render(storage, demo) -> None:
         "traces to stored evidence and source records.",
     )
 
-    incidents = svc.ordered_incidents(storage)
+    ui.mode_banner(
+        mode_label=ctx.mode.label,
+        description=ctx.mode.description,
+        available=ctx.mode.available,
+        reason=ctx.mode.unavailable_reason,
+        detail=ctx.mode.detail or None,
+        simulated=ctx.simulated,
+    )
+
+    storage = ctx.storage
+    demo = ctx.demo
+    incidents = svc.ordered_incidents(storage, source=ctx.source)
+    unattributed = len(storage.get_incidents(source=SOURCE_UNKNOWN)) if storage else 0
     if not incidents:
         ui.empty_state(
             "No incidents stored",
             "Run **Run Local Demonstration Analysis** to detect incidents, "
             "or select a backend that already holds incident records.",
         )
+        if unattributed:
+            st.info(
+                f"{unattributed} stored incident(s) predate provenance "
+                "recording and are not shown in this mode. Their source "
+                "cannot be established, so they are never presented as "
+                "belonging to the current data source."
+            )
         return
 
-    options = {svc.incident_label(i): i for i in incidents}
+    options = {svc.incident_label(i, ctx.display_tz): i for i in incidents}
     selected_label = st.selectbox("Incident", list(options.keys()))
     incident = options[selected_label]
 
+    incident_source = classify_source(incident.source)
     with st.container(border=True):
         st.markdown(
             f"{th.severity_chip(incident.severity)} "
             f"{th.status_chip(incident.status)} "
+            f"{th.chip(f'source: {incident_source}', 'chip-neutral')} "
             f"<span class='reson-mono' style='font-size:0.75rem;color:#94A3B8'>"
             f"{incident.id}</span>",
             unsafe_allow_html=True,
         )
         st.markdown(f"### {incident.title}")
         end = (
-            incident.end_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+            ctx.format_timestamp(incident.end_time)
             if incident.end_time is not None
             else "ongoing (no recovery evidence yet)"
         )
         st.markdown(
             f"<span class='reson-sub'>Start: "
-            f"{incident.start_time.strftime('%Y-%m-%d %H:%M:%S UTC')} · End: "
+            f"{ctx.format_timestamp(incident.start_time)} · End: "
             f"{end} · Services: {', '.join(incident.affected_services) or '—'}"
             "</span>",
             unsafe_allow_html=True,
@@ -102,7 +124,9 @@ def render(storage, demo) -> None:
                 "stored facts."
             )
 
-    evidence = storage.get_evidence(source_id=str(incident.id))
+    evidence = storage.get_evidence(
+        source_id=str(incident.id), source=ctx.source
+    )
     with st.container(border=True):
         ui.panel_header(
             "Evidence chain",
@@ -150,8 +174,9 @@ def render(storage, demo) -> None:
                 items.append(
                     f"<div class='reson-timeline-item {rel}'>"
                     f"<div class='reson-mono' style='font-size:0.75rem'>"
-                    f"{item.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')}</div>"
+                    f"{ctx.format_timestamp(item.timestamp)}</div>"
                     f"<div>{_type_chip(item.target_type)} "
+                    f"{th.chip(f'source: {classify_source(item.source)}', 'chip-neutral')} "
                     f"<span class='reson-mono' style='font-size:0.75rem'>"
                     f"{th.short_id(item.target_id)}</span></div>"
                     f"<div style='font-size:0.8rem;color:#94A3B8'>"
@@ -175,7 +200,7 @@ def render(storage, demo) -> None:
             )
             rows = [
                 {
-                    "Time (UTC)": s.timestamp.strftime("%H:%M:%S"),
+                    f"Time ({ctx.timezone_name})": ctx.format_clock(s.timestamp),
                     "Type": str(getattr(s.source_type, "value", s.source_type)),
                     "Service": s.service,
                     "Trigger": "yes" if s.trigger else "no",

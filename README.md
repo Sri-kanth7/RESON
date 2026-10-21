@@ -1,329 +1,330 @@
 # RESON
 
-Historical System Behavior Intelligence & Incident Analysis Platform.
+**System observability and incident intelligence.**
 
-RESON turns raw system telemetry (metrics, logs, events, deployments) into a
-deterministic, explainable, and traceable picture of current system behavior
-compared against its own recent history.
+RESON collects real telemetry from a computer, keeps the history, works out
+what changed relative to the machine's own recent behaviour, and explains
+what it found with a traceable evidence chain — deterministically, with no
+LLM and no paid API in the loop.
 
-## Phases
+The dashboard is honest about where every number came from. Demonstration
+data is labeled as demonstration, stale telemetry is never called "live", and
+a hosted page never claims to observe the visitor's browser.
 
-Implemented phases:
+---
 
-- **Phase 1 — Foundational Data Platform**: canonical data contracts,
-  deterministic telemetry simulator, Supabase storage layer, and bulk
-  telemetry ingestion.
-- **Phase 2 — Working Intelligence**: normalization, historical baselines,
-  deviation detection, change-point detection, Behavior Fingerprints, and the
-  Behavior Shift Score, orchestrated through the
-  `BehaviorIntelligenceService`.
-- **Phase 3 — Incident Intelligence**: deterministic evidence correlation,
-  incident detection with an explainable severity policy, incident lifecycle,
-  timeline/evidence-chain construction, and historical incident similarity —
-  orchestrated through the `IncidentIntelligenceService` (the System Machine
-  unit `IncidentResearch`).
-- **Phase 3.1 — Evidence Completeness**: preservation of the structured
-  `CorrelationCandidate` output (including rejected pairs and their per-factor
-  values) and deterministic reconstruction of the `Signal` objects behind a
-  persisted incident's evidence chain, so signal-derived similarity factors are
-  no longer structurally `0.0` merely because signals were never reloaded.
+## What RESON actually does
 
-- **Phase 4 — Streamlit Application**: an Obsidian Telemetry-styled local
-  dashboard (`app/`) with four screens — Operations Overview, Incident
-  Investigation, Behavior Analytics, and Historical Incident Explorer — wired
-  to the real Phase 2/3 services. It supports an explicit Supabase production
-  backend and a fully offline `memory` backend, and a user-triggered
-  deterministic demonstration analysis that drives the real ingestion and
-  intelligence pipeline.
+1. **Collects** CPU, memory, swap, disk, network, process, battery, and
+   sensor telemetry from the machine it runs on, with an explicit per-platform
+   capability report.
+2. **Stores** it with provenance — every record carries the telemetry
+   `source` and a stable, non-secret host identifier.
+3. **Analyses** it against the machine's own historical baseline, producing
+   deviations, change points, behavior fingerprints, and a bounded Behavior
+   Shift Score.
+4. **Correlates** the evidence into incidents with severity rationale,
+   a timeline, a full evidence chain, and deterministic historical matching.
+5. **Presents** it in a professional dark-themed dashboard with eight pages,
+   an explicit operating mode, and correct empty states.
 
-LLM-assisted incident analysis is not implemented and is not claimed here.
+There is no LLM call anywhere in the core path. Every result is
+reproducible from the same inputs.
 
-## Package Layout
+---
+
+## Supported operating systems
+
+| Platform | Collector | Status |
+|---|---|---|
+| **Linux** | `src/data/linux_collector.py` | Implemented and **validated** on real hardware |
+| **Windows** | `src/data/windows_collector.py` | Implemented; **platform validation pending** (no Windows machine was available) |
+| **macOS** | `src/data/macos_collector.py` | Implemented; **platform validation pending** (no macOS machine was available) |
+
+All three share one collector interface, so the collection logic is
+identical; only the platform-specific parts differ. See
+[`docs/cross_platform.md`](docs/cross_platform.md) for the per-OS support
+matrix, permissions, capabilities, and limitations — and for the exact steps
+to validate a platform yourself.
+
+---
+
+## Architecture and data flow
+
+```
+   platform collector          ingestion           persistence         intelligence        dashboard
+  (linux/windows/macos)  ->  TelemetryIngestion  ->  SQLite /      ->  baselines,      ->  app/pages/
+                                Service                Supabase /       deviations,          8 pages,
+                                                    memory            change points,       source-aware
+                                                                        incidents +          queries
+                                                                        evidence
+```
+
+Every record keeps its `source` and `host_id` from the collector all the way
+to the rendered card — including the incidents and evidence links derived
+from it. All three storage backends (SQLite, in-memory, Supabase) store,
+return and filter on that provenance. Full detail:
+[`docs/architecture.md`](docs/architecture.md).
+
+### Time handling
+
+Timestamps are always **stored in UTC** and always **rendered in a named
+timezone**. The sidebar has a *Display times in* control (UTC, the host's
+own zone, or any IANA zone) and every timestamp states the zone it is
+rendered in. A naive timestamp is read as UTC, an aware one is converted
+(never relabelled), and daylight saving is applied per instant, so a local
+time on screen is always an accurate local time.
+
+### Package layout
 
 ```
 src/
+  common/config.py            Environment configuration (.env), backend selection
+  common/timeutil.py          UTC storage -> named display timezone (DST-correct)
   data/
-    schemas.py            Data contracts (Metric, Log, Event, Deployment, ...)
-    generator.py          Deterministic telemetry generation
-    simulator.py          Scenario timelines (normal, latency_spike, ...)
-    supabase_client.py    Supabase client factory
-    supabase_storage.py   Bulk storage / retrieval
-    sqlite_storage.py     Persistent local SQLite Storage implementation
-    memory_storage.py     In-memory Storage implementation (offline)
-    orchestrator.py       Ingestion and retrieval orchestration
-  common/
-    config.py             Environment-based configuration (.env)
-  preprocessing/
-    normalizer.py         Group / order / window raw telemetry
-  intelligence/
-    models.py             Domain models and IntelligenceConfig
-    baseline.py           BaselineBuilder (historical statistics)
-    deviation.py          DeviationDetector (z-score + fallback rules)
-    change_detection.py   ChangeDetector (sustained anomaly runs)
-    fingerprint.py        FingerprintBuilder (per-service behavior snapshot)
-    shift.py              BehaviorShiftCalculator (bounded shift score)
-    service.py            BehaviorIntelligenceService (pipeline orchestration)
-  incidents/
-    models.py             IncidentIntelligenceConfig and Phase 3 domain models
-    correlation.py        SignalBuilder + CorrelationEngine
-    detector.py           IncidentDetector + SeverityPolicy
-    lifecycle.py          IncidentLifecycle
-    timeline.py           TimelineBuilder
-    evidence.py           Evidence-chain construction and validation
-    similarity.py         IncidentMatcher (historical incident matching)
-    reconstruction.py     Deterministic historical Signal reconstruction
-    service.py            IncidentIntelligenceService (pipeline orchestration)
+    collector.py              Common Collector interface + BaseCollector lifecycle
+    collector_factory.py      Platform resolution (lazy per-platform imports)
+    linux_collector.py        Linux telemetry
+    windows_collector.py      Windows telemetry
+    macos_collector.py        macOS telemetry
+    windows_event_log.py      Bounded, allowlisted, deduplicated Windows events
+    host_identity.py          Stable, non-secret, hashed host identifier
+    agent.py                  Standalone collector agent (CLI entry point)
+    monitoring.py             Source-aware queries + honest status derivation
+    schemas.py                Data contracts, source values, classify_source()
+    ingestion.py              Record routing to storage
+    sqlite_storage.py         Persistent local storage (WAL, versioned migrations)
+    memory_storage.py         Temporary in-memory storage
+    supabase_storage.py       Cloud storage
+    dataset.py, dataset_service.py, generator.py, simulator.py
+                              Deterministic demonstration data
+    storage.py                Storage abstraction
+  intelligence/               Baselines, deviations, change points, fingerprints, shift
+  incidents/                  Correlation, detection, severity, lifecycle, evidence, matching
+  preprocessing/normalizer.py Series grouping and half-open window slicing
+  orchestrator.py             Composition root (create_application)
 app/
-  streamlit_app.py        Entry point: shell, navigation, backend selection
-  theme.py                Obsidian Telemetry CSS + formatting helpers
-  components/ui.py        Shared presentation components
-  pages/                  Overview, Incidents, Behavior, History renderers
-  services/backend.py     UI-facing adapters over the real src/ services
+  streamlit_app.py            Entry point: shell, navigation, modes, collector
+  theme.py                    Design system (CSS + formatting helpers)
+  components/ui.py            Presentation components
+  pages/                      Overview, System Resources, Processes, System Events,
+                              Incidents, Behavior Analytics, Historical Explorer, Settings
+  services/backend.py         UI adapters over the real src/ services
 ```
 
-## Streamlit Application
+---
 
-The dashboard is a thin presentation layer over the existing services; it
-contains no intelligence of its own.
-
-```powershell
-.\.venv\Scripts\python.exe -m streamlit run app/streamlit_app.py
-```
-
-Select **Supabase** (persistent cloud storage, needs credentials) or
-**Local SQLite** (persistent local storage, no credentials) in the sidebar for
-durable storage; **memory** is temporary, non-persistent storage for fully
-offline use. Then use **Run Local Demonstration Analysis** to generate
-deterministic simulated telemetry and run the real ingestion and intelligence
-pipeline. Simulated telemetry is always labeled as simulated. Supabase remains
-the production default (`RESON_STORAGE_BACKEND`, default `supabase`); the app
-never falls back silently. Local SQLite data is stored in an OS-appropriate
-user data directory (`%APPDATA%\RESON\reson.db` on Windows,
-`~/Library/Application Support/RESON/reson.db` on macOS,
-`$XDG_DATA_HOME/reson/reson.db` on Linux) and can be overridden with
-`RESON_SQLITE_PATH`.
-
-## Quick Start
+## Local installation
 
 ```bash
 python -m pip install -r requirements.txt
-python -m pytest -q
 ```
 
-`IntelligenceConfig` carries the tunable thresholds used across Phase 2:
+Python 3.11+ is recommended. On Windows, invoke the venv interpreter
+directly (`.\.venv\Scripts\python.exe`) rather than changing the PowerShell
+execution policy.
 
-- `min_observations_per_baseline` (default 2) — history a baseline needs
-- `z_score_threshold` (default 3.0) — z-score anomaly threshold
-- `relative_deviation_threshold` (default 0.25) — fallback for constant baselines
-- `consecutive_anomalous_batches` (default 2) — sustained-run requirement
-- `max_z_magnitude` (default 4.0) — clamp for shift peak magnitude
-- `max_gap_seconds` (default 60.0) — tolerated gap within a sustained run
+### Run the dashboard
 
-Phase 2 does **not** depend on Supabase, Streamlit, network access, or
-`get_config()`; it is fully deterministic and offline-testable.
+```bash
+python -m streamlit run app/streamlit_app.py
+```
 
-## Incident Intelligence Pipeline
+### Run the collector
 
-Phase 3 (`src/incidents/`) turns Phase 2 evidence (deviations, change points,
-Behavior Shift Score) and telemetry (logs, events, deployments) into incidents
-with a full evidence trail. It shares the same design constraints as Phase 2:
-deterministic (content-derived UUIDs for incident/evidence ids), explainable,
-reusing the existing `Incident`/`Evidence` contracts, and offline-testable.
-It never claims causality — edges are "correlated with" / "temporally
-associated with" only.
+Two options:
 
-`IncidentIntelligenceConfig` carries the Phase 3 thresholds:
+**In the dashboard** — the sidebar's **Start observation** button starts a
+collector in the app process. Convenient for a quick look.
 
-- `correlation_window_seconds` (default 600.0) — temporal proximity window
-- `deployment_window_seconds` (default 300.0) — deployment impact window
-- `minimum_correlation_strength` (default 0.3) — accepted-edge threshold
-- `incident_gap_seconds` (default 120.0) — adjacent-cluster merge tolerance
-- `severity_shift_threshold` (default 0.5) — behavior shift severity bound
+**As a standalone agent** (recommended for continuous monitoring) — a separate
+process that does not depend on a browser session being open:
 
-Pipeline:
+```bash
+python -m src.data.agent --backend sqlite --interval 5 --retention-days 30
+```
 
-1. **Projection** — `SignalBuilder` normalizes evidence into `Signal` nodes:
-   anomalous deviations and change points are triggers, ERROR/CRITICAL logs and
-   escalation events are triggers, failed/rolled-back deployments are triggers;
-   successful deployments and non-escalation events are context. Normal
-   deviations stay out of the incident corpus (they become lifecycle recovery
-   evidence).
-2. **Correlation** — `CorrelationEngine` evaluates every signal pair once and
-   computes a bounded strength from documented factors: temporal proximity
-   (0.30), same service (0.25), same environment (0.15), metric overlap (0.15),
-   deployment proximity (0.10), event link (0.05). A pair is materialized as
-   `Evidence` (`EVENT_SEQUENCE` / `CORRELATION` / `TEMPORAL`) only when its
-   strength is at or above `minimum_correlation_strength` **and** it carries at
-   least one time-bounded factor (positive temporal proximity, deployment
-   proximity within its window, or event link). Static context alone (shared
-   service/environment/metric key) never associates evidence that is not
-   temporally close, so far-apart alarms never merge into a day-long incident.
-3. **Detection** — `IncidentDetector` builds connected components over accepted
-   edges, merges adjacent components within `incident_gap_seconds`, and emits an
-   incident only for clusters containing a trigger signal. `SeverityPolicy`
-   escalates from LOW by verifiable evidence: behavior shift magnitude, number
-   of affected services, sustained change-point evidence, and critical evidence
-   (ERROR/CRITICAL logs, escalation events, failed deployments, or deployment
-   events with same-service anomalous metrics). Every decision is recorded in a
-   `severity_explanation`.
-4. **Lifecycle** — `IncidentLifecycle` keeps open incidents OPEN with
-   `end_time=None` until positive recovery evidence: a SUCCESS deployment for
-   an affected service strictly after the incident end, a ROLLED_BACK
-   deployment at or after the incident end (the rollback is the mitigation
-   milestone), or a NORMAL deviation for an affected metric key after its last
-   anomalous one. A deployment never resolves an incident on its own — it must
-   be positive evidence, and a later anomalous signal keeps the incident open.
-   Recovery is never inferred from silence.
-5. **Timeline / evidence chain** — `TimelineBuilder` orders the
-   Incident → Signal `Evidence` by `(timestamp, source_id, target_id)`; each
-   entry stays traceable to the raw record ids that produced the signal.
-6. **Historical similarity** — `IncidentMatcher` scores current incidents
-   against `IncidentHistory` candidates using documented `[0,1]` factors
-   (service overlap, metric similarity, event-sequence LCS, deployment
-   relationship, temporal similarity, scenario match), excludes the current
-   incident, preserves historical ids and timelines, and ranks deterministically.
-   Absent evidence is an explicit penalty (scored 0.0 with its full weight), so 1.0
-   is reachable only when every factor is available and identical; two
-   deployment/scenario-free incidents of identical structure cap at 0.80. The
-   penalty affects the magnitude, not the deterministic ranking. Similarity is a
-   structural comparison, not a probability.
+| Option | Meaning |
+|---|---|
+| `--backend` | `sqlite` (default, persistent local file), `memory`, `supabase` |
+| `--interval` | Seconds between cycles (minimum 1.0) |
+| `--retention-days` | Delete telemetry older than this; `0` disables pruning |
+| `--events` | Also collect Windows system events (Windows only) |
+| `--platform` | Override the platform (`windows`, `linux`, `macos`) |
+| `--host-id` | Override the stable host identifier |
+| `--once` | Run one cycle and exit (verification) |
 
-### Orchestration
+Stop the agent with `Ctrl+C`; it handles `SIGINT`/`SIGTERM` and shuts the
+collector down cleanly.
 
-`IncidentIntelligenceService` composes the pipeline:
+### Verify a collection
 
-- `analyze(...)` — run correlation, detection, lifecycle, and timeline for one
-  window, returning an `IncidentIntelligenceResult` of `IncidentResearch`
-  units (the System Machine row: incident, signals, timeline, severity
-  explanation, historical matches). The result also carries
-  `correlation_evidence` (the accepted signal-to-signal relationships) and
-  `correlation_candidates` (every pair the engine evaluated, accepted or
-  rejected, with its per-factor values and explanations). The candidate list is
-  a strict superset of the evidence list, so both "why are these related" and
-  "why are these not related" are answerable from structured factors.
-- `derive_evidence(metrics, baselines, window_start=None, window_end=None, intelligence_config=None)` — bridge that reruns the unmodified
-  Phase 2 `DeviationDetector`/`ChangeDetector` to materialize the deviation
-  and change-point streams `BehaviorAnalysis` keeps internal. For results
-  consistent with a `BehaviorAnalysis`, the same baselines, thresholds
-  (`intelligence_config`), and analysis window must be used; metrics are
-  windowed with `slice_series` (half-open `[start, end)`) exactly like Phase 2.
-  It delegates to `reconstruction.derive_deviation_evidence`, the single shared
-  implementation of that bridge.
-- `find_historical_matches` / `with_history` — rank and attach historical
-  matches to a research unit.
-- `persist(result)` / `historical_candidates(...)` — persist incidents and
-  evidence through the `Storage` abstraction only (never Supabase directly);
-  `historical_candidates` reloads incidents plus their timeline evidence. When
-  supplied a `HistoricalSignalContext` (raw telemetry plus the historical
-  baselines), it also reconstructs each incident's `Signal` objects from that
-  stored evidence chain, which is what keeps `metric_similarity`,
-  `event_sequence_similarity` and `deployment_relationship` from scoring a
-  structural `0.0` for evidence that genuinely exists. Reconstruction admits a
-  signal only when the incident's own chain already references it, so nothing
-  is invented, and it is window-independent of any other analysis window.
+```bash
+python -m src.data.agent --backend sqlite --once
+```
 
-### Historical Signal Reconstruction
+```
+RESON collector agent starting: backend=sqlite host=reson-14336f25bdc8c777 source=linux_local interval=5.0s
+Collected and ingested 80 metric record(s).
+```
 
-`IncidentMatcher` derives three of its six similarity factors exclusively from
-`IncidentHistory.signals`, and Phase 3 persists incidents and evidence but not
-signals. `HistoricalSignalReconstructor` closes that gap by rebuilding the
-signals from the raw telemetry and baselines that produced them, composing only
-components that already exist: `group_metrics`/`slice_series` for grouping and
-the half-open window, the unmodified Phase 2 `DeviationDetector` and
-`ChangeDetector`, and the unmodified Phase 3 `SignalBuilder`. No Phase 2 or
-Phase 3 algorithm is duplicated or re-implemented.
+---
 
-Two invariants make the result safe and honest:
+## Monitoring modes
 
-- **Traceability** — a rebuilt signal is admitted only when an `Evidence` row
-  whose `source_id` is the incident id already points at it, so a signal is
-  never synthesized that the stored evidence does not already reference, and
-  every admitted signal keeps the real `source_record_ids` behind it. The
-  `Incident -> Evidence -> source record` path stays resolvable.
-- **Historical / current separation** — admission is decided by chain
-  membership rather than by the window, so telemetry from another analysis
-  window cannot leak in. A deviation's `source_id` is its `Metric` record id,
-  and a change point's is content-derived, so an identically-derived change
-  point in another window is by construction the same change point.
+The dashboard's mode is explicit and shown on every page.
 
-Because `Incident.end_time` *is* the timestamp of the last supporting signal,
-the incident's inclusive span is expressed as a half-open window by advancing
-the end by one microsecond — the same idiom `BehaviorIntelligenceService` uses
-to keep its final observation inside a half-open window. Without it the final
-signal would be silently dropped and the reconstruction would be quietly
-incomplete.
+| Mode | Shows | Source |
+|---|---|---|
+| **Local monitoring** | Real telemetry from a collector on this computer | `windows_local` / `linux_local` / `macos_local` |
+| **Demonstration** | Clearly labeled synthetic data | `simulation` |
+| **Hosted monitoring** | Telemetry received from a separately running collector | `hosted_collector` |
+| **Imported history** | Imported historical records | `imported` |
 
-Signals the context cannot reproduce are omitted rather than approximated, and
-the documented evidence penalty is unchanged: a factor with no evidence on
-either side still scores `0.0` with its full weight. When all six factors are
-genuinely available and identical, `overall_similarity` reaches `1.0`.
+A mode with no data says so and shows nothing in its place. RESON never
+substitutes one mode's data for another's, and running the demonstration
+analysis switches the dashboard into demonstration mode so its results are
+never mistaken for live telemetry.
 
-Phase 3 does **not** depend on Supabase, Streamlit, network access, an LLM, or
-`get_config()`; it is fully deterministic and offline-testable.
+---
 
-## Preprocessing and Normalization
+## Storage configuration
 
-- `group_metrics(metrics)` groups metric records by
-  `(service, environment, metric_name)`, orders each series by timestamp (then
-  record id for stability), and never mutates inputs.
-- `slice_series(series, start, end)` returns the observations in the half-open
-  window `[start, end)`.
+| Backend | Durability | Credentials | Use |
+|---|---|---|---|
+| `sqlite` | Persistent local file | None | Local single-host monitoring (recommended default) |
+| `supabase` | Persistent, shared cloud | `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | Shared / multi-user deployments |
+| `memory` | RAM only, per process | None | Offline development and tests |
 
-## Behavior Intelligence Pipeline
+The local SQLite file lives in an OS-appropriate user data directory
+(`%APPDATA%\RESON\reson.db` on Windows,
+`~/Library/Application Support/RESON/reson.db` on macOS,
+`$XDG_DATA_HOME/reson/reson.db` on Linux). Override it with
+`RESON_SQLITE_PATH`.
 
-1. **Historical baseline** — `BaselineBuilder.build_baselines` computes mean,
-   sample standard deviation, min/max, and interpolated percentiles
-   (10th/25th/50th/75th/90th) per metric key. Below
-   `min_observations_per_baseline` no baseline is produced.
-2. **Deviation detection** — `DeviationDetector` flags each observation by
-   comparing current values against the historical baseline:
-   - variable baseline → z-score against `z_score_threshold`
-   - constant baseline → relative deviation against
-     `relative_deviation_threshold`
-   - zero-only baseline → absolute deviation
-   - missing / insufficient baseline → `INSUFFICIENT_REFERENCE` status
-     (never an exception)
-3. **Change-point detection** — `ChangeDetector` groups deviations by
-   timestamp and flags metrics that remain anomalous across at least
-   `consecutive_anomalous_batches` timestamps (allowing small gaps bounded by
-   `max_gap_seconds`).
-4. **Behavior Fingerprint** — `FingerprintBuilder` produces a per-service,
-   per-window snapshot: per-metric behavior counts/statistics, peak absolute
-   z-score, log/event summaries, deployment and change-point counts, and the
-   source record ids that produced the signal (full traceability).
-5. **Behavior Shift Score** — `BehaviorShiftCalculator` returns a value in
-   `[0, 1]`: the mean per-metric contribution, where each contribution is
-   `anomaly_rate × peak_magnitude` (anomaly rate = share of anomalous
-   observations; peak magnitude = bounded maximum deviation, clamped at
-   `max_z_magnitude`).
+The dashboard preselects `sqlite` when Supabase credentials are absent, so
+it always starts on a backend that works — and the sidebar always states
+which backend is in use and whether it is persistent.
 
-The Behavior Shift Score is an **explainable, bounded measure of deviation
-evidence**. It is not a probability and makes no attribution claim about
-causes.
+---
 
-### Orchestration
+## Running the tests
 
-`BehaviorIntelligenceService` composes the pipeline:
+```bash
+# Full suite
+python -m pytest -q
 
-- `build_baselines(metrics, window_start, window_end)` — build history baselines.
-- `analyze(baselines, metrics, logs, events, deployments, window_start,
-  window_end)` — analyze a current window, returning a `BehaviorAnalysis`
-  with one `ServiceBehavior` per affected service, `overall_score`, and
-  `changed_services`.
-- `analyze_history(...)` — convenience wrapper that builds history baselines
-  then analyzes a current window.
+# Offline suite — no credentials, no network
+python -m pytest -q --ignore=tests/test_storage.py --ignore=tests/test_supabase_connection.py
+```
 
-When `window_end` is omitted on `analyze`, the window closes at the final
-observed timestamp (plus one microsecond), keeping the last observation
-included.
+19 of the tests are **live Supabase integration tests**. They are marked
+`requires_supabase` and are **skipped with an explicit reason** when
+`SUPABASE_URL` / `SUPABASE_SECRET_KEY` are not configured; their assertions
+are unchanged and run in full when the credentials are present.
 
-## Simulator-Driven Validation
+Everything else runs offline against the SQLite and in-memory backends:
 
-`tests/test_intelligence_scenarios.py` uses `SystemSimulator` (a fixed seed)
-as a *validation source*, not as logic inside the intelligence modules:
+```
+512 passed, 19 skipped
+```
 
-- `normal` / `deployment` timelines stay near baseline → score `0.0`,
-  `changed_services` empty.
-- `latency_spike`, `error_spike`, `database_pressure`,
-  `deployment_regression` produce deviation evidence and a positive shift.
-- Sustained anomalies form change points; an isolated spike does not.
+No assertion was weakened or skipped to make the suite green — the skips are
+precondition guards on live integration tests, and they are reported, not
+hidden.
+
+---
+
+## Deploying the hosted dashboard
+
+The repository is prepared for Streamlit Community Cloud and similar
+platforms: `.streamlit/config.toml`, `requirements.txt`, a `Procfile`, and
+`app/streamlit_app.py` as the entry point.
+
+```bash
+# Or on a Procfile-based platform
+web: streamlit run app/streamlit_app.py --server.headless true --server.address 0.0.0.0 --server.port ${PORT:-8501}
+```
+
+Full instructions, including the clean-environment verification procedure:
+[`docs/deployment.md`](docs/deployment.md).
+
+### Why a hosted URL needs a separate collector
+
+**A public RESON URL cannot read your computer's CPU, memory, battery,
+processes, or event logs.** The code that runs on a hosted Streamlit
+instance executes on the hosting server. The browser does not expose those
+APIs to a Streamlit app, and no configuration flag changes that.
+
+So a hosted deployment offers two separate experiences:
+
+- **Hosted demonstration** — the deterministic simulator runs inside the
+  hosted app and every view is labeled as simulated. Available today.
+- **Hosted real monitoring** — a collector agent runs on the machine you
+  want to watch and sends telemetry to the hosted instance over an
+  authenticated ingestion path. This requires agent authentication,
+  per-host authorization, tenant isolation, transport security, server-side
+  validation, rate limits, replay protection, and secret rotation. **That
+  path is not implemented in this build**, so the hosted mode reports
+  "unavailable" rather than showing synthetic data as if it were live.
+
+The requirement list is in [`docs/deployment.md`](docs/deployment.md) §6.
+
+### Durability on a hosted platform
+
+A hosted platform's filesystem is ephemeral. A SQLite file written there does
+not survive a restart and is not shared between visitors, so it must never be
+presented as durable shared storage. Use a managed database (Supabase) for
+anything that must persist.
+
+---
+
+## Privacy
+
+RESON applies data minimization by default. It **does not** collect
+passwords, tokens, environment-variable values, process command-line
+arguments, browser history, packet payloads, file contents, or user
+identities. It **does** collect CPU/memory/swap utilization, disk capacity
+and I/O counters, network interface counters, process PID/name/CPU/RSS,
+battery status where a battery exists, and hardware sensors where the OS
+exposes them.
+
+Remote transmission is off by default and is not implemented. Full detail:
+[`docs/security_and_privacy.md`](docs/security_and_privacy.md).
+
+---
+
+## Current limitations and known issues
+
+| Limitation | Status |
+|---|---|
+| Windows and macOS platform validation | **Pending** — implemented and unit-tested, but never run on real Windows/macOS hardware |
+| Remote (hosted) ingestion | **Not implemented** — hosted real monitoring reports "unavailable" |
+| Dashboard authentication / tenant isolation | **Not implemented** — a public deployment exposes whatever its backend holds |
+| macOS unified log collection | **Not implemented** — the Windows event-log collector is Windows-only |
+| Linux/macOS system event collection | **Not implemented** |
+| Provenance columns on an existing Supabase project | **Owner action** — a project created before the provenance columns cannot attribute records; the backend detects this, reports it, and refuses to filter by a column it does not have |
+| Supabase live integration tests | Require credentials; skipped with an explicit reason when absent |
+| Browser automation | Not present — the dashboard is verified with Streamlit's `AppTest` harness |
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | Data flow, layer boundaries, collector lifecycle, configuration |
+| [`docs/deployment.md`](docs/deployment.md) | Local run, hosted deployment, clean-environment verification, remote-ingestion requirements |
+| [`docs/cross_platform.md`](docs/cross_platform.md) | Per-OS support matrix, permissions, capabilities, limitations, how to validate |
+| [`docs/security_and_privacy.md`](docs/security_and_privacy.md) | What is and is not collected, host identity, secrets, retention, known gaps |
+| [`docs/telemetry_sources.md`](docs/telemetry_sources.md) | Source values, full data catalog, time semantics |
+| [`docs/troubleshooting.md`](docs/troubleshooting.md) | Symptoms and fixes |
+| [`docs/development.md`](docs/development.md) | Day-to-day development workflow |
+| [`RESON_MASTER_IMPLEMENTATION_PLAN.md`](RESON_MASTER_IMPLEMENTATION_PLAN.md) | Phase-by-phase status, evidence, blockers, next action |
+| [`RESON_DEPLOYMENT_READINESS_REPORT.md`](RESON_DEPLOYMENT_READINESS_REPORT.md) | Deployment readiness assessment |
+
+---
+
+## License
+
+See [`LICENSE`](LICENSE).

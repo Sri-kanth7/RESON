@@ -7,6 +7,8 @@ Invalid selections must fail loudly; nothing falls back silently.
 
 import pytest
 
+from tests.conftest import requires_supabase
+
 from src.common.config import get_config
 from src.data.ingestion import TelemetryIngestionService
 from src.data.memory_storage import InMemoryStorage
@@ -39,6 +41,7 @@ def forbid_supabase_client(monkeypatch):
     )
 
 
+@requires_supabase
 def test_default_backend_is_supabase(fresh_config):
     monkeypatch = fresh_config
     monkeypatch.delenv("RESON_STORAGE_BACKEND", raising=False)
@@ -47,6 +50,7 @@ def test_default_backend_is_supabase(fresh_config):
     assert config.supabase is not None
 
 
+@requires_supabase
 def test_create_application_defaults_to_supabase(fresh_config):
     monkeypatch = fresh_config
     monkeypatch.delenv("RESON_STORAGE_BACKEND", raising=False)

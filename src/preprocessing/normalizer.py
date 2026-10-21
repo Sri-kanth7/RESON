@@ -12,11 +12,18 @@ from src.data.schemas import Metric
 
 @dataclass(frozen=True)
 class MetricObservation:
-    """A single normalized metric value with its source identity preserved."""
+    """A single normalized metric value with its source identity preserved.
+
+    ``source`` and ``host_id`` carry the provenance of the observation so it
+    survives normalization into the intelligence pipeline, where it ends up
+    on the incidents and evidence derived from it.
+    """
 
     record_id: UUID
     timestamp: datetime
     value: float
+    source: str | None = None
+    host_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +65,8 @@ def group_metrics(metrics: Iterable[Metric]) -> list[MetricSeries]:
                 record_id=metric.id,
                 timestamp=metric.timestamp,
                 value=metric.value,
+                source=metric.source,
+                host_id=metric.host_id,
             )
         )
 

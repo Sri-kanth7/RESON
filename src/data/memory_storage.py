@@ -40,7 +40,7 @@ from src.data.schemas import (
     Metric,
     Service,
 )
-from src.data.storage import Storage
+from src.data.storage import Storage, source_matches
 
 
 def _plain(value: object) -> str:
@@ -112,6 +112,8 @@ class InMemoryStorage(Storage):
         self,
         service: str | None = None,
         metric_name: str | None = None,
+        source: str | None = None,
+        host_id: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[Metric]:
@@ -121,6 +123,8 @@ class InMemoryStorage(Storage):
             for metric in self._metrics
             if (service is None or metric.service == _plain(service))
             and (metric_name is None or metric.metric_name == metric_name)
+            and source_matches(metric.source, source)
+            and (host_id is None or metric.host_id == host_id)
             and _within(metric.timestamp, start_time, end_time)
         ]
         results.sort(key=lambda item: (item.timestamp, str(item.id)))
@@ -142,6 +146,8 @@ class InMemoryStorage(Storage):
         target_id: str | None = None,
         target_type: str | None = None,
         relationship_type: str | None = None,
+        source: str | None = None,
+        host_id: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[Evidence]:
@@ -157,6 +163,8 @@ class InMemoryStorage(Storage):
                 relationship_type is None
                 or _plain(item.relationship_type) == _plain(relationship_type)
             )
+            and source_matches(item.source, source)
+            and (host_id is None or item.host_id == host_id)
             and _within(item.timestamp, start_time, end_time)
         ]
         results.sort(key=lambda item: (item.timestamp, str(item.id)))
@@ -176,16 +184,20 @@ class InMemoryStorage(Storage):
         severity: str | None = None,
         status: str | None = None,
         scenario: str | None = None,
+        source: str | None = None,
+        host_id: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[Incident]:
-        """Retrieve incidents using optional historical filters."""
+        """Retrieve incidents using optional historical and provenance filters."""
         results = [
             incident
             for incident in self._incidents.values()
             if (severity is None or _plain(incident.severity) == _plain(severity))
             and (status is None or _plain(incident.status) == _plain(status))
             and (scenario is None or incident.scenario == _plain(scenario))
+            and source_matches(incident.source, source)
+            and (host_id is None or incident.host_id == host_id)
             and _within(incident.start_time, start_time, end_time)
         ]
         results.sort(key=lambda item: (item.start_time, str(item.id)))
@@ -210,6 +222,8 @@ class InMemoryStorage(Storage):
         self,
         service: str | None = None,
         status: str | None = None,
+        source: str | None = None,
+        host_id: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[Deployment]:
@@ -219,6 +233,8 @@ class InMemoryStorage(Storage):
             for deployment in self._deployments
             if (service is None or deployment.service == _plain(service))
             and (status is None or _plain(deployment.status) == _plain(status))
+            and source_matches(deployment.source, source)
+            and (host_id is None or deployment.host_id == host_id)
             and _within(deployment.timestamp, start_time, end_time)
         ]
         results.sort(key=lambda item: (item.timestamp, str(item.id)))
@@ -243,6 +259,8 @@ class InMemoryStorage(Storage):
         self,
         service: str | None = None,
         event_type: str | None = None,
+        source: str | None = None,
+        host_id: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[Event]:
@@ -252,6 +270,8 @@ class InMemoryStorage(Storage):
             for event in self._events
             if (service is None or event.service == _plain(service))
             and (event_type is None or _plain(event.event_type) == _plain(event_type))
+            and source_matches(event.source, source)
+            and (host_id is None or event.host_id == host_id)
             and _within(event.timestamp, start_time, end_time)
         ]
         results.sort(key=lambda item: (item.timestamp, str(item.id)))
@@ -276,6 +296,8 @@ class InMemoryStorage(Storage):
         self,
         service: str | None = None,
         level: str | None = None,
+        source: str | None = None,
+        host_id: str | None = None,
         start_time: datetime | None = None,
         end_time: datetime | None = None,
     ) -> list[Log]:
@@ -285,7 +307,43 @@ class InMemoryStorage(Storage):
             for log in self._logs
             if (service is None or log.service == _plain(service))
             and (level is None or _plain(log.level) == _plain(level))
+            and source_matches(log.source, source)
+            and (host_id is None or log.host_id == host_id)
             and _within(log.timestamp, start_time, end_time)
         ]
         results.sort(key=lambda item: (item.timestamp, str(item.id)))
         return results
+
+    def purge_before(self, cutoff: datetime) -> dict[str, int]:
+        """Delete telemetry records older than ``cutoff``."""
+        removed = {
+            "metrics": 0,
+            "logs": 0,
+            "events": 0,
+            "deployments": 0,
+            "evidence": 0,
+        }
+
+        def keep(items, count_key):
+            kept = []
+            for item in items:
+                if item.timestamp < cutoff:
+                    removed[count_key] += 1
+                else:
+                    kept.append(item)
+            return kept
+
+        self._metrics = keep(self._metrics, "metrics")
+        self._logs = keep(self._logs, "logs")
+        self._events = keep(self._events, "events")
+        self._deployments = keep(self._deployments, "deployments")
+
+        kept_evidence = []
+        for item in self._evidence.values():
+            if item.timestamp < cutoff:
+                removed["evidence"] += 1
+            else:
+                kept_evidence.append(item)
+        self._evidence = {str(item.id): item for item in kept_evidence}
+
+        return removed

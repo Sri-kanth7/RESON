@@ -17,7 +17,7 @@ _FACTORS = (
 )
 
 
-def render(storage, demo) -> None:
+def render(ctx) -> None:
     ui.page_header(
         "Historical incident repository &amp; pattern matching",
         "Historical Incident Explorer &amp; Pattern Matching",
@@ -26,7 +26,18 @@ def render(storage, demo) -> None:
         "never probabilities.",
     )
 
-    incidents = svc.ordered_incidents(storage)
+    ui.mode_banner(
+        mode_label=ctx.mode.label,
+        description=ctx.mode.description,
+        available=ctx.mode.available,
+        reason=ctx.mode.unavailable_reason,
+        detail=ctx.mode.detail or None,
+        simulated=ctx.simulated,
+    )
+
+    storage = ctx.storage
+    demo = ctx.demo
+    incidents = svc.ordered_incidents(storage, source=ctx.source)
     if not incidents:
         ui.empty_state(
             "No historical data",
@@ -57,7 +68,7 @@ def render(storage, demo) -> None:
         st.info("No incidents match the selected filters.")
         return
 
-    options = {svc.incident_label(i): i for i in filtered}
+    options = {svc.incident_label(i, ctx.display_tz): i for i in filtered}
     current = options[st.selectbox("Current incident", list(options.keys()))]
 
     with st.container(border=True):
@@ -73,7 +84,8 @@ def render(storage, demo) -> None:
         st.markdown(f"**{current.title}**")
         st.markdown(
             f"<span class='reson-sub'>{current.id} · "
-            f"{current.start_time.strftime('%Y-%m-%d %H:%M UTC')} · services: "
+            f"{ctx.format_timestamp(current.start_time, fmt='%Y-%m-%d %H:%M')} "
+            f"({ctx.timezone_name} local) · services: "
             f"{', '.join(current.affected_services) or '—'}</span>",
             unsafe_allow_html=True,
         )
@@ -90,10 +102,14 @@ def render(storage, demo) -> None:
                 "Re-run the demonstration analysis to enable ranking. The "
                 "stored timeline below is complete and traceable."
             )
-            evidence = storage.get_evidence(source_id=str(current.id))
+            evidence = storage.get_evidence(
+                source_id=str(current.id), source=ctx.source
+            )
             rows = [
                 {
-                    "Time (UTC)": e.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    f"Time ({ctx.timezone_name})": ctx.format_timestamp(
+                        e.timestamp
+                    ),
                     "Target": th.short_id(e.target_id),
                     "Type": str(getattr(e.target_type, "value", e.target_type)),
                     "Strength": round(e.strength, 3),
@@ -134,7 +150,8 @@ def render(storage, demo) -> None:
                 st.markdown(f"**{hist.title}**")
                 st.markdown(
                     f"<span class='reson-sub'>{th.short_id(hist.id)} · "
-                    f"{hist.start_time.strftime('%Y-%m-%d %H:%M UTC')} · "
+                    f"{ctx.format_timestamp(hist.start_time, fmt='%Y-%m-%d %H:%M')} "
+                    f"({ctx.timezone_name} local) · "
                     f"{', '.join(hist.affected_services)}</span>",
                     unsafe_allow_html=True,
                 )
@@ -169,7 +186,7 @@ def render(storage, demo) -> None:
                 for item in research.timeline:
                     st.markdown(
                         f"<div class='reson-mono' style='font-size:0.72rem'>"
-                        f"{item.timestamp.strftime('%H:%M:%S')} · "
+                        f"{ctx.format_clock(item.timestamp)} · "
                         f"{th.short_id(item.target_id)}</div>",
                         unsafe_allow_html=True,
                     )
@@ -181,7 +198,7 @@ def render(storage, demo) -> None:
                 for item in top.historical_timeline:
                     st.markdown(
                         f"<div class='reson-mono' style='font-size:0.72rem'>"
-                        f"{item.timestamp.strftime('%H:%M:%S')} · "
+                        f"{ctx.format_clock(item.timestamp)} · "
                         f"{th.short_id(item.target_id)}</div>",
                         unsafe_allow_html=True,
                     )

@@ -61,6 +61,8 @@ def link_incident_signals(
                 relationship_type="correlation",
                 timestamp=signal.timestamp,
                 strength=signal.strength,
+                source=signal.source,
+                host_id=signal.host_id,
                 explanation=(
                     f"Supporting evidence for incident {incident_id}: "
                     f"{signal.description} "
@@ -71,6 +73,26 @@ def link_incident_signals(
         )
 
     return chain
+
+
+def dominant_provenance(
+    signals: Sequence[Signal],
+) -> tuple[str | None, str | None]:
+    """Return the provenance shared by a set of signals.
+
+    The source and host are returned only when every signal that carries
+    provenance agrees on it. A cluster that mixes sources (or mixes hosts)
+    is left unattributed rather than attributed to an arbitrary one.
+    """
+    sources = {
+        signal.source for signal in signals if signal.source is not None
+    }
+    hosts = {
+        signal.host_id for signal in signals if signal.host_id is not None
+    }
+    source = sources.pop() if len(sources) == 1 else None
+    host = hosts.pop() if len(hosts) == 1 else None
+    return source, host
 
 
 def order_timeline(evidence: Iterable[Evidence]) -> list[Evidence]:

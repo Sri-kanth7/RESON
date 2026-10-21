@@ -32,25 +32,104 @@ def topbar(
     data_source: str,
     simulated: bool,
     reachable: bool,
+    mode_label: str | None = None,
+    status_label: str | None = None,
+    status_ok: bool = False,
+    timezone_label: str | None = None,
 ) -> None:
-    """Render the shared top context bar (brand + environment + status)."""
+    """Render the shared top context bar (brand + environment + status).
+
+    ``mode_label`` names the active operating mode and ``status_label``
+    reports the derived collector status. The live indicator reflects the
+    *derived* status, never a session flag. ``timezone_label`` names the
+    timezone timestamps are rendered in, so the clock on screen is never
+    ambiguous.
+    """
     if not reachable:
         live = '<span class="reson-live off">BACKEND UNREACHABLE</span>'
     elif simulated:
         live = '<span class="reson-live sim">SIMULATED TELEMETRY</span>'
-    else:
+    elif status_ok:
         live = '<span class="reson-live">LIVE DATA</span>'
+    else:
+        live = '<span class="reson-live off">NOT LIVE</span>'
+
+    mode_html = (
+        f'<span class="reson-env">mode: {mode_label}</span>'
+        if mode_label
+        else ""
+    )
+    status_html = (
+        f'<span class="reson-env">status: {status_label}</span>'
+        if status_label
+        else ""
+    )
+    timezone_html = (
+        f'<span class="reson-env">tz: {timezone_label}</span>'
+        if timezone_label
+        else ""
+    )
     st.markdown(
         '<div class="reson-topbar">'
         '<div class="reson-topbar-left">'
         '<span class="reson-brand"><span class="reson-mark">◉</span> RESON</span>'
         '<span class="reson-env">env: ' + environment + "</span>"
         '<span class="reson-env">source: ' + data_source + "</span>"
-        "</div>"
+        + mode_html
+        + status_html
+        + timezone_html
+        + "</div>"
         '<div class="reson-topbar-right">' + live + "</div>"
         "</div>",
         unsafe_allow_html=True,
     )
+
+
+def mode_banner(
+    mode_label: str,
+    description: str,
+    available: bool,
+    reason: str | None = None,
+    detail: str | None = None,
+    simulated: bool = False,
+) -> None:
+    """Render the prominent operating-mode banner.
+
+    The banner is shown on every page so the current mode is never ambiguous.
+    When the selected mode has no data, the reason is stated explicitly rather
+    than silently showing another mode's data.
+    """
+    tone = "sim" if simulated else ("off" if not available else "")
+    header = (
+        f'<span class="reson-live {tone}">MODE: {mode_label.upper()}</span>'
+    )
+    st.markdown(
+        '<div class="reson-panel reson-mode-banner">'
+        f"{header}"
+        f'<div style="margin-top:0.35rem;font-size:0.85rem;color:#94A3B8">'
+        f"{description}</div>"
+        + (
+            f'<div class="reson-sub" style="margin-top:0.25rem">{detail}</div>'
+            if detail
+            else ""
+        )
+        + (
+            f'<div class="reson-sub" style="margin-top:0.25rem;color:#F59E0B">'
+            f"{reason}</div>"
+            if (reason and not available)
+            else ""
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def status_chip(status: str, ok: bool = False) -> str:
+    """Render a derived collector status as a chip."""
+    style = "chip-low" if ok else (
+        "chip-critical" if status in ("error", "permission_denied") else "chip-neutral"
+    )
+    return th.chip(status.replace("_", " ").upper(), style)
 
 
 def panel_header(title: str, subtitle: str | None = None) -> None:

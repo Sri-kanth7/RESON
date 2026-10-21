@@ -8,19 +8,21 @@ from app.components import ui
 from app.services import backend as svc
 
 
-def _observed_frame(points) -> pd.DataFrame:
+def _observed_frame(points, ctx) -> pd.DataFrame:
     return pd.DataFrame(
         {"observed": [v for _, v in points]},
-        index=pd.DatetimeIndex([t for t, _ in points], name="time"),
+        index=pd.DatetimeIndex(
+            [ctx.to_chart_time(t) for t, _ in points], name="time"
+        ),
     )
 
 
-def _baseline_chart(frame: pd.DataFrame, stats):
+def _baseline_chart(frame: pd.DataFrame, stats, ctx):
     band = (
         alt.Chart(frame)
         .mark_area(color="#00E5FF", opacity=0.16)
         .encode(
-            x=alt.X("time:T", title="Time (UTC)"),
+            x=alt.X("time:T", title=ctx.chart_axis_title()),
             y=alt.Y("p25:Q", title="Observed value"),
             y2="p75:Q",
         )
@@ -38,9 +40,13 @@ def _baseline_chart(frame: pd.DataFrame, stats):
     return (band + mean + observed).properties(height=280)
 
 
-def _zscore_chart(deviations):
+def _zscore_chart(deviations, ctx):
     rows = [
-        {"time": d.timestamp, "z": d.z_score, "status": str(getattr(d.status, "value", d.status))}
+        {
+            "time": ctx.to_chart_time(d.timestamp),
+            "z": d.z_score,
+            "status": str(getattr(d.status, "value", d.status)),
+        }
         for d in deviations
         if d.z_score is not None
     ]
@@ -51,7 +57,7 @@ def _zscore_chart(deviations):
         alt.Chart(frame)
         .mark_bar(size=6)
         .encode(
-            x=alt.X("time:T", title="Time (UTC)"),
+            x=alt.X("time:T", title=ctx.chart_axis_title()),
             y=alt.Y("z:Q", title="Z-score (sigma)"),
             color=alt.condition(
                 alt.datum.status == "anomalous",
@@ -68,7 +74,7 @@ def _zscore_chart(deviations):
     )
 
 
-def render(storage, demo) -> None:
+def render(ctx) -> None:
     ui.page_header(
         "Behavior analytics &amp; deviation profiling",
         "System Behavior Drift &amp; Signature Analytics",
@@ -77,6 +83,17 @@ def render(storage, demo) -> None:
         "not probabilities.",
     )
 
+    ui.mode_banner(
+        mode_label=ctx.mode.label,
+        description=ctx.mode.description,
+        available=ctx.mode.available,
+        reason=ctx.mode.unavailable_reason,
+        detail=ctx.mode.detail or None,
+        simulated=ctx.simulated,
+    )
+
+    storage = ctx.storage
+    demo = ctx.demo
     keys = svc.metric_keys(storage)
     if not keys:
         ui.empty_state(
@@ -105,7 +122,7 @@ def render(storage, demo) -> None:
             points = svc.series_for_key(storage, key)
             if points:
                 st.line_chart(
-                    _observed_frame(points), width="stretch"
+                    _observed_frame(points, ctx), width="stretch"
                 )
         return
 
@@ -171,19 +188,22 @@ def render(storage, demo) -> None:
                 "p75": [stats.p75 if stats.p75 is not None else float("nan")]
                 * len(points),
             },
-            index=pd.DatetimeIndex([t for t, _ in points], name="time"),
+            index=pd.DatetimeIndex(
+                [ctx.to_chart_time(t) for t, _ in points], name="time"
+            ),
         ).reset_index()
         st.altair_chart(
-            ui.darken(_baseline_chart(frame, stats)), width="stretch"
+            ui.darken(_baseline_chart(frame, stats, ctx)), width="stretch"
         )
         st.caption(
             f"Baseline window: "
-            f"{baseline.start_time.strftime('%Y-%m-%d %H:%M UTC')} → "
-            f"{baseline.end_time.strftime('%Y-%m-%d %H:%M UTC')} · "
+            f"{ctx.format_timestamp(baseline.start_time, fmt='%Y-%m-%d %H:%M')} → "
+            f"{ctx.format_timestamp(baseline.end_time, fmt='%Y-%m-%d %H:%M')} "
+            f"({ctx.timezone_name} local) · "
             f"{baseline.explanation}"
         )
 
-    z_chart = _zscore_chart(key_deviations)
+    z_chart = _zscore_chart(key_deviations, ctx)
     if z_chart is not None:
         with st.container(border=True):
             ui.panel_header(
@@ -199,7 +219,7 @@ def render(storage, demo) -> None:
         else:
             rows = [
                 {
-                    "Time (UTC)": d.timestamp.strftime("%H:%M:%S"),
+                    f"Time ({ctx.timezone_name})": ctx.format_clock(d.timestamp),
                     "Value": round(d.value, 3),
                     "Status": str(getattr(d.status, "value", d.status)),
                     "z-score": round(d.z_score, 3) if d.z_score is not None else "—",
@@ -219,8 +239,8 @@ def render(storage, demo) -> None:
             for cp in key_changes:
                 st.markdown(
                     f"<span class='reson-mono' style='font-size:0.75rem'>"
-                    f"{cp.start_time.strftime('%H:%M:%S')} → "
-                    f"{cp.end_time.strftime('%H:%M:%S UTC')} · "
+                    f"{ctx.format_clock(cp.start_time)} → "
+                    f"{ctx.format_clock(cp.end_time)} · "
                     f"{cp.consecutive_batches} batches</span><br>{cp.explanation}",
                     unsafe_allow_html=True,
                 )

@@ -4,6 +4,8 @@ import pytest
 from pydantic import ValidationError
 
 from src.data.schemas import (
+    SOURCE_VALUES,
+    classify_source,
     Deployment,
     DeploymentStatus,
     Environment,
@@ -197,3 +199,74 @@ def test_unknown_fields_are_rejected():
             unit="ms",
             unknown_field="should fail",
         )
+
+
+def test_source_values_are_documented():
+    expected = {
+        "windows_local",
+        "linux_local",
+        "macos_local",
+        "hosted_collector",
+        "simulation",
+        "imported",
+        "unknown",
+    }
+    assert set(SOURCE_VALUES) == expected
+
+
+def test_classify_source_none_is_unknown():
+    assert classify_source(None) == "unknown"
+
+
+def test_classify_source_unknown_string_is_unknown():
+    assert classify_source("not-a-real-source") == "unknown"
+
+
+def test_classify_source_known_sources_pass_through():
+    for source in SOURCE_VALUES:
+        assert classify_source(source) == source
+
+
+def test_log_event_deployment_default_source_is_none():
+    now = datetime.now()
+    for record in (
+        Log(
+            timestamp=now,
+            service="svc",
+            environment=Environment.DEVELOPMENT,
+            level=LogLevel.INFO,
+            message="m",
+        ),
+        Event(
+            timestamp=now,
+            service="svc",
+            environment=Environment.DEVELOPMENT,
+            event_type=EventType.RESTART,
+            description="d",
+        ),
+        Deployment(
+            timestamp=now,
+            service="svc",
+            environment=Environment.DEVELOPMENT,
+            version="1.0",
+            status=DeploymentStatus.SUCCESS,
+        ),
+    ):
+        assert record.source is None
+        assert record.host_id is None
+        assert classify_source(record.source) == "unknown"
+
+
+def test_log_event_deployment_accept_source_and_host_id():
+    now = datetime.now()
+    log = Log(
+        timestamp=now,
+        service="svc",
+        environment=Environment.DEVELOPMENT,
+        level=LogLevel.INFO,
+        message="m",
+        source="windows_local",
+        host_id="host-1",
+    )
+    assert log.source == "windows_local"
+    assert log.host_id == "host-1"

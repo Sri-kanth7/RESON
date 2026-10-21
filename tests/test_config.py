@@ -1,6 +1,9 @@
+from tests.conftest import requires_supabase
+
 from src.common.config import get_config
 
 
+@requires_supabase
 def test_config_loads():
     config = get_config()
 
@@ -9,6 +12,7 @@ def test_config_loads():
     assert config.environment == "development"
 
 
+@requires_supabase
 def test_config_is_cached():
     first = get_config()
     second = get_config()

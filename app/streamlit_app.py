@@ -1,22 +1,49 @@
 """RESON Streamlit entry point: shared shell, navigation, backend status."""
 
+import os
+
 import streamlit as st
 
 from app import theme as th
 from app.components import ui
-from app.pages import behavior, history, incidents, overview
-from app.services import backend as svc
-from src.data.windows_collector import (
-    SOURCE_WINDOWS_LOCAL,
-    CollectorState,
-    WindowsTelemetryCollector,
+from app.pages import (
+    behavior,
+    history,
+    incidents,
+    overview,
+    processes,
+    settings,
+    system_events,
+    system_resources,
 )
+from app.services import backend as svc
+from src.common.timeutil import (
+    COMMON_TIMEZONES,
+    resolve_timezone,
+    server_timezone_name,
+    timezone_label,
+)
+from src.data.collector import CollectorState
+from src.data.collector_factory import create_collector
+from src.data.monitoring import MonitoringMode
 
 NAV_OPTIONS = (
     "Overview",
+    "System Resources",
+    "Processes",
+    "System Events",
     "Incidents",
     "Behavior Analytics",
     "Historical Explorer",
+    "Settings",
+)
+
+#: Monitoring modes offered in the sidebar, in display order.
+MODE_OPTIONS = (
+    (MonitoringMode.LOCAL.value, "Local monitoring (this computer)"),
+    (MonitoringMode.DEMONSTRATION.value, "Demonstration (simulated data)"),
+    (MonitoringMode.HOSTED.value, "Hosted monitoring (remote collector)"),
+    (MonitoringMode.IMPORTED.value, "Imported history"),
 )
 
 st.set_page_config(
@@ -29,13 +56,108 @@ st.set_page_config(
 st.markdown(th.OBSIDIAN_CSS, unsafe_allow_html=True)
 
 
+def _default_backend() -> str:
+    """Return the backend preselected in the sidebar.
+
+    Supabase is the production default, but it requires credentials. When
+    they are absent the sidebar preselects **sqlite**, which works with no
+    credentials and no network, instead of preselecting a backend that would
+    immediately fail. This is an initial selection only: the user can always
+    change the backend, and nothing is ever silently substituted at runtime.
+    """
+    if os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SECRET_KEY"):
+        return "supabase"
+    return "sqlite"
+
+
+def _default_timezone() -> str:
+    """Return the timezone the dashboard displays timestamps in by default.
+
+    The host's own zone is used when the platform exposes one, otherwise
+    UTC. Only the *presentation* changes: every value stays stored in UTC.
+    """
+    return server_timezone_name() or "UTC"
+
+
+def _timezone_choices() -> list[str]:
+    """Return the selectable display timezones, host zone first."""
+    choices: list[str] = []
+    host_zone = server_timezone_name()
+    if host_zone:
+        choices.append(host_zone)
+    for name in COMMON_TIMEZONES:
+        if name not in choices:
+            choices.append(name)
+    return choices
+
+
+def _timezone_label(name: str) -> str:
+    """Return the sidebar label for a timezone choice."""
+    if name == server_timezone_name() and name != "UTC":
+        return f"Local time ({name})"
+    if name == "UTC":
+        return "UTC (Coordinated Universal Time)"
+    return name
+
+
+def _timezone_sidebar() -> str:
+    """Render the display-timezone control and return the chosen zone.
+
+    Timestamps are always *stored* in UTC; this control only changes the
+    timezone they are *rendered* in, and the current choice is shown in the
+    sidebar so a reader always knows which clock they are looking at.
+    """
+    st.sidebar.markdown(
+        '<div class="reson-kicker">Display</div>',
+        unsafe_allow_html=True,
+    )
+    choices = _timezone_choices()
+    current = st.session_state.get("reson_timezone")
+    if current not in choices:
+        current = choices[0]
+    selected = st.sidebar.selectbox(
+        "Display times in",
+        choices,
+        index=choices.index(current),
+        format_func=_timezone_label,
+        help=(
+            "All timestamps are stored in UTC. This setting changes only how "
+            "they are rendered, including daylight-saving adjustments."
+        ),
+    )
+    custom = st.sidebar.text_input(
+        "Other IANA time zone",
+        value="",
+        placeholder="e.g. Europe/Lisbon",
+        help=(
+            "Optional. Any IANA zone name is accepted and takes precedence "
+            "over the list above."
+        ),
+    ).strip()
+    if custom:
+        resolved = resolve_timezone(custom)
+        # An unrecognised name resolves to UTC; only accept it when the user
+        # typed something that is not silently downgraded.
+        if timezone_label(resolved) == "UTC" and custom.upper() != "UTC":
+            st.sidebar.error(
+                f"'{custom}' is not a known time zone. Showing UTC instead."
+            )
+        else:
+            st.session_state["reson_timezone"] = custom
+            return custom
+    st.session_state["reson_timezone"] = selected
+    return selected
+
+
 def _init_state() -> None:
-    st.session_state.setdefault("reson_backend", "supabase")
+    st.session_state.setdefault("reson_backend", _default_backend())
     st.session_state.setdefault("reson_app", None)
     st.session_state.setdefault("reson_app_error", None)
     st.session_state.setdefault("reson_demo", None)
     st.session_state.setdefault("reson_demo_error", None)
     st.session_state.setdefault("reson_collector", None)
+    st.session_state.setdefault("reson_mode", MonitoringMode.LOCAL.value)
+    st.session_state.setdefault("reson_timezone", _default_timezone())
 
 
 def _stop_collector() -> None:
@@ -101,6 +223,39 @@ def _sidebar() -> str:
         st.session_state["reson_backend"] = backend
         st.rerun()
 
+    if not (
+        os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SECRET_KEY")
+    ):
+        st.sidebar.caption(
+            "Supabase credentials are not configured, so **sqlite** is "
+            "preselected. Switch backends at any time; nothing is "
+            "substituted silently."
+        )
+
+    mode_keys = [key for key, _ in MODE_OPTIONS]
+    mode_labels = {key: label for key, label in MODE_OPTIONS}
+    current_mode = st.session_state.get("reson_mode", MonitoringMode.LOCAL.value)
+    if current_mode not in mode_keys:
+        current_mode = MonitoringMode.LOCAL.value
+    selected_label = st.sidebar.selectbox(
+        "Monitoring mode",
+        [mode_labels[key] for key in mode_keys],
+        index=mode_keys.index(current_mode),
+        help=(
+            "Local monitoring shows real telemetry from a collector running on "
+            "this computer. Demonstration shows clearly labeled synthetic "
+            "data. Hosted monitoring shows telemetry received from a "
+            "separately running collector — opening this page never observes "
+            "your computer."
+        ),
+    )
+    mode = next(
+        key for key in mode_keys if mode_labels[key] == selected_label
+    )
+    if mode != st.session_state["reson_mode"]:
+        st.session_state["reson_mode"] = mode
+        st.rerun()
+
     app = st.session_state.get("reson_app")
     if app is not None:
         health = svc.storage_health(app.storage)
@@ -110,12 +265,14 @@ def _sidebar() -> str:
             if backend == "sqlite"
             else ("persistent cloud" if backend == "supabase" else "memory only (RAM)")
         )
+        durability_label = "durable" if persistent else "not durable"
         db_path = ""
         if backend == "sqlite" and health.get("database_path"):
             db_path = f" · {health['database_path']}"
         st.sidebar.markdown(
             "<span class='reson-sub'>"
-            f"Mode: {backend} · {persistence_label}{db_path} · "
+            f"Storage: {backend} · {persistence_label} ({durability_label})"
+            f"{db_path} · "
             f"operational: {'yes' if health['operational'] else 'no'}"
             "</span>",
             unsafe_allow_html=True,
@@ -125,22 +282,46 @@ def _sidebar() -> str:
                 f"Storage read failed: {health['error']}. New data cannot be "
                 "saved until the backend is operational."
             )
+        provenance = health.get("provenance") or {}
+        if provenance and not provenance.get("supported", True):
+            st.sidebar.warning(
+                "This backend cannot store telemetry provenance for every "
+                "table. Records written there are reported as 'unknown' "
+                "and never as live telemetry."
+            )
 
     page = st.sidebar.radio("Navigate", NAV_OPTIONS)
 
+    _timezone_sidebar()
+
     app = st.session_state.get("reson_app")
     if app is not None:
-        if st.session_state.get("reson_demo") is not None:
-            st.sidebar.markdown(
-                '<div class="reson-live sim" style="margin-top:0.25rem">'
-                "Simulated telemetry in session</div>",
-                unsafe_allow_html=True,
-            )
+        collector = st.session_state.get("reson_collector")
+        demo = st.session_state.get("reson_demo")
+        context = svc.build_context(
+            app.storage,
+            collector,
+            st.session_state["reson_mode"],
+            demo=demo,
+            backend_name=backend,
+            display_tz=st.session_state.get("reson_timezone"),
+        )
+        st.session_state["reson_context"] = context
+
+        if context.mode.simulated:
+            tone = "sim"
+            label = "Demonstration data"
+        elif context.live:
+            tone = ""
+            label = "Live data"
         else:
-            st.sidebar.markdown(
-                '<div class="reson-live">Live data mode</div>',
-                unsafe_allow_html=True,
-            )
+            tone = "off"
+            label = context.status.label
+        st.sidebar.markdown(
+            f'<div class="reson-live {tone}" style="margin-top:0.25rem">'
+            f"{label}</div>",
+            unsafe_allow_html=True,
+        )
 
     st.sidebar.markdown("---")
     if app is not None:
@@ -153,6 +334,13 @@ def _sidebar() -> str:
             try:
                 with st.spinner("Running ingestion and intelligence pipeline…"):
                     st.session_state["reson_demo"] = svc.run_demonstration(app)
+                # Demonstration data is stored under the 'simulation' source.
+                # Switch the dashboard into demonstration mode so the results
+                # are shown in their own clearly labeled view rather than
+                # being mixed with live telemetry.
+                st.session_state["reson_mode"] = (
+                    MonitoringMode.DEMONSTRATION.value
+                )
             except Exception as exc:  # visible, never swallowed
                 st.session_state["reson_demo_error"] = (
                     f"Demonstration analysis failed: {exc}"
@@ -196,10 +384,10 @@ def _sidebar() -> str:
 
 
 def _observation_sidebar(app) -> None:
-    """Real Windows telemetry observation controls (start/stop/state)."""
+    """Real host telemetry observation controls (start/stop/state)."""
 
     st.sidebar.markdown(
-        '<div class="reson-kicker">Real Windows telemetry</div>',
+        '<div class="reson-kicker">Real host telemetry</div>',
         unsafe_allow_html=True,
     )
     collector = st.session_state.get("reson_collector")
@@ -207,7 +395,7 @@ def _observation_sidebar(app) -> None:
 
     st.sidebar.markdown(
         "<span class='reson-sub'>"
-        f"Source: {SOURCE_WINDOWS_LOCAL} · "
+        f"Source: {collector.source if collector else '—'} · "
         f"Host: {collector.host_id if collector else '—'}"
         "</span>",
         unsafe_allow_html=True,
@@ -224,7 +412,7 @@ def _observation_sidebar(app) -> None:
         "them through the selected backend.",
     ):
         try:
-            new_collector = WindowsTelemetryCollector()
+            new_collector = create_collector()
             new_collector.start(
                 interval_seconds=5.0,
                 publish=svc.observation_publish(app.ingestion),
@@ -270,11 +458,18 @@ def _observation_sidebar(app) -> None:
             unsafe_allow_html=True,
         )
         if host is not None:
+            context = st.session_state.get("reson_context")
+            display_tz = (
+                context.display_tz
+                if context is not None
+                else resolve_timezone(st.session_state.get("reson_timezone"))
+            )
             st.sidebar.markdown(
                 "<span class='reson-sub'>"
                 f"CPU {host.cpu_percent if host.cpu_percent is not None else '—'}% · "
                 f"RAM {host.memory_percent if host.memory_percent is not None else '—'}% · "
-                f"Last sample {host.timestamp.strftime('%H:%M:%S UTC')}"
+                f"Last sample {svc.format_clock(host.timestamp, display_tz)} "
+                f"({svc.timezone_label(display_tz)})"
                 "</span>",
                 unsafe_allow_html=True,
             )
@@ -332,11 +527,27 @@ def main() -> None:
         return
 
     demo = st.session_state.get("reson_demo")
+    context = st.session_state.get("reson_context")
+    if context is None:
+        context = svc.build_context(
+            app.storage,
+            st.session_state.get("reson_collector"),
+            st.session_state["reson_mode"],
+            demo=demo,
+            backend_name=st.session_state["reson_backend"],
+            display_tz=st.session_state.get("reson_timezone"),
+        )
+        st.session_state["reson_context"] = context
+
     ui.topbar(
         environment=app.config.environment,
-        data_source=st.session_state["reson_backend"],
-        simulated=demo is not None,
+        data_source=context.source or "all",
+        simulated=context.simulated,
         reachable=True,
+        mode_label=context.mode.label,
+        status_label=context.status.label,
+        status_ok=context.live,
+        timezone_label=context.timezone_name,
     )
 
     storage = app.storage
@@ -346,29 +557,34 @@ def main() -> None:
         host_id = collector.host_id
         live = {
             "collector": collector,
-            "readiness": svc.host_readiness(storage, host_id),
+            "readiness": svc.host_readiness(
+                storage, host_id, source=collector.source
+            ),
         }
         try:
             live["comparison"] = svc.compare_today_vs_prior_day(
-                storage, host_id=host_id, source=SOURCE_WINDOWS_LOCAL
+                storage, host_id=host_id, source=collector.source
             )
         except Exception as exc:  # comparison is informational, never fatal
             live["comparison_error"] = str(exc)
 
     try:
         if page == "Overview":
-            overview.render(
-                storage,
-                demo,
-                st.session_state["reson_backend"],
-                live=live,
-            )
+            overview.render(context, live=live)
+        elif page == "System Resources":
+            system_resources.render(context)
+        elif page == "Processes":
+            processes.render(context)
+        elif page == "System Events":
+            system_events.render(context)
         elif page == "Incidents":
-            incidents.render(storage, demo)
+            incidents.render(context)
         elif page == "Behavior Analytics":
-            behavior.render(storage, demo)
+            behavior.render(context)
+        elif page == "Historical Explorer":
+            history.render(context)
         else:
-            history.render(storage, demo)
+            settings.render(context)
     except Exception as exc:
         _backend_error_panel(
             f"Backend read failed: {exc}. The selected "

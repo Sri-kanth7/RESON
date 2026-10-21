@@ -15,10 +15,13 @@ from src.intelligence.baseline import BaselineReadiness
 
 
 @pytest.fixture
-def offline_env(monkeypatch):
+def offline_env(monkeypatch, tmp_path):
     monkeypatch.delenv("RESON_STORAGE_BACKEND", raising=False)
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_SECRET_KEY", raising=False)
+    # Keep any sqlite-backed path inside a throwaway directory; tests must
+    # never write to the user's real data directory.
+    monkeypatch.setenv("RESON_SQLITE_PATH", str(tmp_path / "ui_services.db"))
     get_config.cache_clear()
     get_supabase_client.cache_clear()
     yield monkeypatch
