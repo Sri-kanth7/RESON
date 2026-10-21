@@ -1,11 +1,11 @@
 # RESON Master Implementation Plan
 
 **Project:** RESON — System Observability & Incident Intelligence Platform
-**Branch:** `main` | **HEAD:** `4ce1662 fix: harden SQLite concurrent writes` (unchanged — no commit was made)
-**Working tree:** 27 modified tracked files + 34 untracked paths, all preserved
-**Status:** Phases 0–3, 6–8 implemented and verified; Phase 1 completion
-(1.6 local-time display), Phase 4 gap 4.5 (incident/evidence provenance) and
-the Phase 5 Supabase-provenance defect were closed in the 2026-10-21 recovery
+**Branch:** `main` | **HEAD:** `97361fa feat: complete RESON observability platform with telemetry provenance` (pushed to `origin/main`)
+**Working tree:** clean
+**Status:** Phases 0–4, 6–8 implemented and verified. Phase 1 task 1.6
+(local-time display), Phase 4 gap 4.5 (incident/evidence provenance) and the
+Phase 5 Supabase-provenance defect were closed in the 2026-10-21 recovery
 session. Phase 5 remote ingestion remains deliberately unimplemented.
 
 > **Recovery note (2026-10-21).** This document was last edited by the
@@ -86,16 +86,32 @@ skip marker is in place, the same 19 tests report as **skipped**.
 | D7 | The master plan's header, §6 acceptance matrix and §7 status table described a pre-Phase-1 state while §4 described Phases 1–8 as done. | Documentation defect | **Fixed** (this document) |
 | D8 | `RESON_DEPLOYMENT_READINESS_REPORT.md` reported "496 passed, 19 failed"; the actual count differed, and the report listed the `Incident`/`Evidence` provenance gap as open. | Documentation defect | **Fixed** (§8.4) |
 
-### 0.5 Recovery checkpoint (recorded, no commit made)
+### 0.5 Recovery checkpoint
+
+At the **start** of the recovery session (before any change):
 
 - Branch `main`, HEAD `4ce1662`, upstream `origin/main` — **unchanged**.
+- 27 modified tracked files + 34 untracked paths, all preserved.
 - No commit, push, reset, clean, stash, or history rewrite was performed.
-- No file was deleted or reverted. Every pre-existing change is preserved.
 - No real user database was touched: all migration and storage tests use
   temporary files (`tmp_path`), and the live agent run used
   `/tmp/opencode/agent.db`.
-- The only destructive-capable code path (migration v4) was exercised against
-  throwaway databases and a hand-built legacy database.
+
+At the **end** of the session, the owner explicitly authorised a commit and
+push:
+
+- **Commit `97361fa`** — *feat: complete RESON observability platform with
+  telemetry provenance* (73 files, +16,050 / −1,152), pushed to
+  `origin/main`. Local and remote are in sync (0 ahead, 0 behind).
+- The working tree is clean by **both** `git status` and `git diff HEAD
+  --stat`.
+- No destructive Git operation was performed at any point: no reset, clean,
+  stash, rebase, history rewrite, or force push.
+- `RESON_NEXT_TASKS.md` was added as the hand-off for the next session.
+
+The only destructive-capable code path (migration v4) was exercised against
+throwaway databases and a hand-built legacy database — never against the
+user's real database.
 
 ### 0.6 Phase status at recovery
 
@@ -166,10 +182,11 @@ Telemetry transport (authenticated, future)  -->  ingestion/validation -->
 - HEAD commit: **unchanged** at `4ce1662 fix: harden SQLite concurrent writes`.
   **No commit, push, reset, clean, stash, or history rewrite was performed.**
 - Working tree: modified/new files listed in the final report; nothing staged.
-- The 4 pre-existing untracked report files are **untouched** (original
-  timestamps preserved): `IMPLEMENTATION_SUMMARY.md`,
+- The 4 pre-existing report files (`IMPLEMENTATION_SUMMARY.md`,
   `RESON_AUDIT_REVIEW_REPORT.md`, `RESON_FINAL_IMPLEMENTATION_REPORT.md`,
-  `RESON_IMPLEMENTATION_REPORT.md`.
+  `RESON_IMPLEMENTATION_REPORT.md`) were **never edited, reverted or
+  deleted** during the work. They are now tracked in Git by commit
+  `97361fa`, so their content is preserved in history as well as on disk.
 - `.gitignore` excludes `*.sqlite3`, `reson.db`, `.reson/`, `.env`,
   `.venv`, `.pytest_cache/`, `__pycache__/`, and `.streamlit/secrets.toml`.
   `.streamlit/config.toml` is intentionally tracked (it holds no secrets).
@@ -348,7 +365,7 @@ See §16 of the directive.
 
 | Area | Acceptance requirement | Status | Evidence |
 |---|---|---|---|
-| Repository integrity | Existing user changes preserved; no unauthorized Git ops | IMPLEMENTED | The 4 pre-existing untracked reports are untouched; no commit/push/reset/clean performed; `git status` shows only intended changes |
+| Repository integrity | Existing user changes preserved; no unauthorized Git ops | IMPLEMENTED | The 4 pre-existing reports were never edited, reverted or deleted, and are now tracked in Git; no reset/clean/stash/history-rewrite/force-push was performed. The one commit was made **after the owner explicitly asked for it** |
 | Persistent plan | Every phase has status, evidence, blockers, next steps | IMPLEMENTED | This document — all 9 phases carry a status, evidence, and next action |
 | Data provenance | Every new observation has reliable source | IMPLEMENTED | `source` + `host_id` on **every** record type (Metric, Log, Event, Deployment, Incident, Evidence); `classify_source()`; every collector stamps source + host id; **all three storage backends** store, return and filter provenance |
 | Legacy data | Unknown sources remain explicitly unknown unless proven | IMPLEMENTED | `classify_source(None) == "unknown"`; `source="unknown"` matches NULL-source rows; `test_legacy_record_without_source_is_preserved_as_none` |
@@ -568,37 +585,42 @@ Every stored record carries a real source and the stable hashed host identity.
 
 ## 12. Exact Next Action
 
+**The implementation is committed and pushed.** `RESON_NEXT_TASKS.md` holds
+the prioritised hand-off for the next working session; this section states
+the priority order at a glance.
+
 **Owner action required — the implementation is complete for every phase that
 can be completed without Windows/macOS hardware, a Supabase project, or
 hosting credentials.**
 
 In priority order:
 
-1. **Review the diff and merge.** Nothing has been committed or pushed. The
-   working tree contains the whole implementation; the 4 pre-existing
-   untracked report files are untouched.
-2. **Validate Windows and/or macOS on real hardware** — follow
+1. **Review the committed work.** Commit `97361fa` is on `origin/main`. The
+   pre-existing report files are now tracked, so they are preserved in
+   history.
+2. **Bound the correlation engine's pairwise work** (§12.1): the default
+   demonstration timeline takes ~53 s because it evaluates ~18,900 signal
+   pairs. A 5-batch timeline takes ~0.06 s. The result must not change.
+3. **Validate Windows and/or macOS on real hardware** — follow
    `docs/cross_platform.md` §6. That converts those platforms from
    *implemented, validation pending* to *validated* and is the only thing
    standing between the current state and full cross-platform support.
-3. **Deploy the hosted dashboard** — follow `docs/deployment.md` §2–§3. The
+4. **Deploy the hosted dashboard** — follow `docs/deployment.md` §2–§3. The
    artifacts are in place. Verify the demonstration mode is labeled and that
    hosted real monitoring correctly reports "unavailable" until remote
    ingestion exists.
-4. **Decide on remote ingestion.** It is the only unimplemented functional
+5. **Add the provenance columns to an existing Supabase project** —
+   `docs/deployment.md` §3.4. Until then the backend reports that it cannot
+   attribute records, and the dashboard shows them as `unknown`.
+6. **Decide on remote ingestion.** It is the only unimplemented functional
    capability. `docs/deployment.md` §6 lists the eleven requirements that must
    be met and tested before it may be enabled.
-5. **Optional follow-ups**, in order of value: add macOS unified-log and Linux
-   journald event readers; add CI for the offline suite; add the provenance
-   columns to an existing Supabase project (`ALTER TABLE metrics ADD COLUMN
-   source TEXT;` and the equivalent for `logs`, `events`, `deployments`,
-   `incidents`, `evidence`) so a hosted deployment can attribute records;
-   bound the correlation engine's pairwise work — the full default
-   demonstration timeline (15 batches) produces ~18,900 candidate pairs and
-   takes ~53 s, while a 5-batch timeline takes ~0.06 s.
+7. **Optional follow-ups**, in order of value: add CI for the offline suite;
+   add macOS unified-log and Linux journald event readers; run the Supabase
+   path against a real project (it has never been executed against one).
 
-On resuming work: reread this plan, re-verify the Git state
-(`git status`, `git diff HEAD --stat`, `git log --oneline -1` — **not**
-`git status` alone, see §0.2), run `python -m pytest -q` to
+On resuming work: reread this plan and `RESON_NEXT_TASKS.md`, re-verify the
+Git state (`git status`, `git diff HEAD --stat`, `git log --oneline -1` —
+**not** `git status` alone, see §0.2), run `python -m pytest -q` to
 re-establish the test baseline, and continue from the first incomplete item
 above.
