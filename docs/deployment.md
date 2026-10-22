@@ -72,7 +72,7 @@ python -m src.data.agent --backend sqlite --interval 5 --retention-days 30
 | `--backend` | `sqlite` (default), `memory`, `supabase` |
 | `--interval` | Seconds between collection cycles (minimum 1.0) |
 | `--retention-days` | Delete telemetry older than this. `0` disables pruning |
-| `--events` | Also collect Windows system events (Windows only) |
+| `--events` | Also collect operating-system system events (Windows Event Log, systemd journal, macOS unified log) |
 | `--platform` | Override the platform (`windows`, `linux`, `macos`) |
 | `--host-id` | Override the stable host identifier |
 | `--once` | Run a single cycle and exit (useful for verification) |

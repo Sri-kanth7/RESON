@@ -48,6 +48,8 @@ associations, never root cause.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable, Sequence
 
 from src.data.schemas import Deployment, DeploymentStatus, Event, EvidenceType, Log, RelationshipType
@@ -59,6 +61,7 @@ from src.incidents.models import (
     IncidentIntelligenceConfig,
     Signal,
     content_id,
+    content_id_from_canonical,
 )
 
 CRITICAL_LOG_LEVELS = ("ERROR", "CRITICAL")
@@ -95,6 +98,57 @@ def _env_value(environment) -> str:
 
 def _baseline_key_string(key: BaselineKey) -> str:
     return f"{key.service}/{key.environment}/{key.metric_name}"
+
+
+#: Cache of the two-decimal rendering of factor values.
+#:
+#: A pair sweep renders the same handful of factor values over and over (a
+#: bounded set of services, environments and time gaps), so each distinct
+#: value is formatted once instead of once per pair.
+_FACTOR_FORMAT_CACHE: dict[float, str] = {}
+
+#: Upper bound for the factor-format cache. Beyond this the cache is reset,
+#: so a pathological input cannot grow it without bound.
+_FACTOR_FORMAT_CACHE_LIMIT = 100_000
+
+
+def _format_factor(value: float) -> str:
+    """Return the two-decimal rendering of one factor value."""
+    formatted = _FACTOR_FORMAT_CACHE.get(value)
+    if formatted is None:
+        formatted = f"{value:.2f}"
+        if len(_FACTOR_FORMAT_CACHE) >= _FACTOR_FORMAT_CACHE_LIMIT:
+            _FACTOR_FORMAT_CACHE.clear()
+        _FACTOR_FORMAT_CACHE[value] = formatted
+    return formatted
+
+
+@dataclass(frozen=True)
+class _PreparedSignal:
+    """The values of one signal that do not depend on the signal it is paired with.
+
+    The correlation engine evaluates every distinct signal pair. Anything that
+    depends on a single signal only — its service, its environment, its metric
+    keys, its identifier, its timestamp — is computed once here and reused for
+    every pair the signal takes part in. This changes no factor, no threshold
+    and no identifier; it only removes repeated work.
+    """
+
+    signal: Signal
+    """The signal this preparation describes."""
+    uuid_str: str
+    """Canonical string form of the signal id (used in ids and explanations)."""
+    type_value: str
+    """Plain value of the signal's evidence type."""
+    service: str
+    environment: str
+    is_deployment: bool
+    is_event: bool
+    key_strings: frozenset[str]
+    """Canonical metric-key strings referenced by the signal."""
+    timestamp: datetime
+    timestamp_iso: str
+    """ISO-8601 rendering of the timestamp, used by the identifier."""
 
 
 class SignalBuilder:
@@ -307,31 +361,75 @@ class CorrelationEngine:
         Returns ``(candidates, accepted_evidence)``. ``candidates`` preserves
         the per-factor breakdown for explainability; ``accepted_evidence`` is
         the deduplicated, deterministically ordered ``Evidence`` list.
+
+        The engine evaluates every pair, so the work is quadratic in the number
+        of signals by construction — the *output* is quadratic too. What the
+        implementation controls is the cost of one pair: every value that
+        depends on a single signal is prepared once (see
+        :class:`_PreparedSignal`) and reused, instead of being recomputed for
+        every pair it appears in. The pairs evaluated, the factors computed,
+        the decisions taken, and the identifiers produced are unchanged.
         """
         ordered = sorted(signals, key=lambda signal: (signal.timestamp, signal.source_id))
+        prepared = [self._prepare(signal) for signal in ordered]
 
         candidates: list[CorrelationCandidate] = []
-        evidence: list = []
+        #: (sort key, evidence) pairs. The sort key is built from the cached
+        #: identifier strings, so the ordering is the documented one
+        #: (``str(source_id)``, ``str(target_id)``) without re-rendering every
+        #: identifier a second time.
+        evidence_entries: list[tuple[str, str, object]] = []
         seen: set[object] = set()
 
-        for index, source in enumerate(ordered):
-            for target in ordered[index + 1:]:
-                candidate = self._evaluate(source, target)
+        for index, source in enumerate(prepared):
+            for target in prepared[index + 1:]:
+                candidate = self._evaluate_prepared(source, target)
                 if candidate.accepted:
-                    item = self._materialize(candidate)
+                    item = self._materialize_prepared(candidate, source, target)
                     dedup_key = (item.source_id, item.target_id, item.relationship_type)
                     if dedup_key not in seen:
                         seen.add(dedup_key)
-                        evidence.append(item)
+                        evidence_entries.append(
+                            (source.uuid_str, target.uuid_str, item)
+                        )
                 candidates.append(candidate)
 
-        evidence.sort(key=lambda item: (str(item.source_id), str(item.target_id)))
+        evidence_entries.sort(key=lambda entry: (entry[0], entry[1]))
+        evidence = [entry[2] for entry in evidence_entries]
         return candidates, evidence
+
+    @staticmethod
+    def _prepare(signal: Signal) -> _PreparedSignal:
+        """Return the prepared view of one signal."""
+        return _PreparedSignal(
+            signal=signal,
+            uuid_str=str(signal.source_id),
+            type_value=signal.source_type.value,
+            service=signal.service,
+            environment=signal.environment,
+            is_deployment=signal.source_type == EvidenceType.DEPLOYMENT,
+            is_event=signal.source_type == EvidenceType.EVENT,
+            key_strings=frozenset(
+                _baseline_key_string(key) for key in signal.related_keys
+            ),
+            timestamp=signal.timestamp,
+            timestamp_iso=signal.timestamp.isoformat(),
+        )
 
     def _evaluate(
         self,
         source: Signal,
         target: Signal,
+    ) -> CorrelationCandidate:
+        """Evaluate one pair of signals (convenience wrapper)."""
+        return self._evaluate_prepared(
+            self._prepare(source), self._prepare(target)
+        )
+
+    def _evaluate_prepared(
+        self,
+        source: _PreparedSignal,
+        target: _PreparedSignal,
     ) -> CorrelationCandidate:
         gap = abs((target.timestamp - source.timestamp).total_seconds())
         temporal = max(
@@ -358,6 +456,10 @@ class CorrelationEngine:
             if self._computable(name, source, target)
         }
 
+        #: ``sum`` is used deliberately: CPython applies compensated
+        #: (Neumaier) summation to floats, so a hand-rolled accumulation
+        #: would produce a *different* last bit and change every strength
+        #: value. The identifier and factor values must stay bit-identical.
         numerator = sum(
             FACTOR_WEIGHTS[name] * value
             for name, value in computable.items()
@@ -398,8 +500,8 @@ class CorrelationEngine:
         )
 
         return CorrelationCandidate(
-            source=source,
-            target=target,
+            source=source.signal,
+            target=target.signal,
             relationship_type=relationship,
             timestamp=reference_ts,
             service_relationship="same" if same_service else "cross",
@@ -416,51 +518,45 @@ class CorrelationEngine:
         )
 
     @staticmethod
-    def _computable(name: str, source: Signal, target: Signal) -> bool:
+    def _computable(
+        name: str,
+        source: _PreparedSignal,
+        target: _PreparedSignal,
+    ) -> bool:
         if name == "metric_overlap":
-            return bool(source.related_keys) and bool(target.related_keys)
+            return bool(source.key_strings) and bool(target.key_strings)
         if name == "deployment_proximity":
-            return (
-                source.source_type == EvidenceType.DEPLOYMENT
-                or target.source_type == EvidenceType.DEPLOYMENT
-            )
+            return source.is_deployment or target.is_deployment
         if name == "event_link":
-            return (
-                source.source_type == EvidenceType.EVENT
-                or target.source_type == EvidenceType.EVENT
-            )
+            return source.is_event or target.is_event
         return True
 
     @staticmethod
-    def _metric_overlap(source: Signal, target: Signal) -> float:
-        source_keys = set(
-            _baseline_key_string(key) for key in source.related_keys
-        )
-        target_keys = set(
-            _baseline_key_string(key) for key in target.related_keys
-        )
-        return 1.0 if source_keys & target_keys else 0.0
+    def _metric_overlap(
+        source: _PreparedSignal,
+        target: _PreparedSignal,
+    ) -> float:
+        return 1.0 if source.key_strings & target.key_strings else 0.0
 
     def _deployment_proximity(
         self,
-        source: Signal,
-        target: Signal,
+        source: _PreparedSignal,
+        target: _PreparedSignal,
         gap: float,
     ) -> float:
-        if not (
-            source.source_type == EvidenceType.DEPLOYMENT
-            or target.source_type == EvidenceType.DEPLOYMENT
-        ):
+        if not (source.is_deployment or target.is_deployment):
             return 0.0
         if gap > self._config.deployment_window_seconds:
             return 0.0
         return 1.0 if source.service == target.service else 0.5
 
-    def _event_link(self, source: Signal, target: Signal, gap: float) -> float:
-        if not (
-            source.source_type == EvidenceType.EVENT
-            or target.source_type == EvidenceType.EVENT
-        ):
+    def _event_link(
+        self,
+        source: _PreparedSignal,
+        target: _PreparedSignal,
+        gap: float,
+    ) -> float:
+        if not (source.is_event or target.is_event):
             return 0.0
         if gap > self._config.correlation_window_seconds:
             return 0.0
@@ -468,14 +564,11 @@ class CorrelationEngine:
 
     @staticmethod
     def _relationship_type(
-        source: Signal,
-        target: Signal,
+        source: _PreparedSignal,
+        target: _PreparedSignal,
         factors: dict[str, float],
     ) -> RelationshipType:
-        if (
-            source.source_type == EvidenceType.EVENT
-            and target.source_type == EvidenceType.EVENT
-        ):
+        if (source.is_event and target.is_event):
             return RelationshipType.EVENT_SEQUENCE
 
         shared_context = any(
@@ -492,8 +585,8 @@ class CorrelationEngine:
 
     @staticmethod
     def _explanation(
-        source: Signal,
-        target: Signal,
+        source: _PreparedSignal,
+        target: _PreparedSignal,
         relationship: RelationshipType,
         strength: float,
         accepted: bool,
@@ -502,7 +595,7 @@ class CorrelationEngine:
         gate_rejected: bool = False,
     ) -> str:
         applied = [
-            f"{name}={value:.2f}"
+            f"{name}={_format_factor(value)}"
             for name, value in factors.items()
             if value > 0.0
         ]
@@ -511,13 +604,26 @@ class CorrelationEngine:
             decision = "rejected (no time-bounded relationship, outside " \
                 "correlation/deployment windows)"
         return (
-            f"{source.source_type.value} {source.source_id} is {decision} as "
-            f"{relationship.value} with {target.source_type.value} "
-            f"{target.source_id} (strength={strength:.3f}, factors: "
+            f"{source.type_value} {source.uuid_str} is {decision} as "
+            f"{relationship.value} with {target.type_value} "
+            f"{target.uuid_str} (strength={strength:.3f}, factors: "
             f"{', '.join(applied) if applied else 'none'})."
         )
 
     def _materialize(self, candidate: CorrelationCandidate):
+        """Materialize an accepted candidate into the ``Evidence`` contract."""
+        return self._materialize_prepared(
+            candidate,
+            self._prepare(candidate.source),
+            self._prepare(candidate.target),
+        )
+
+    def _materialize_prepared(
+        self,
+        candidate: CorrelationCandidate,
+        source: _PreparedSignal,
+        target: _PreparedSignal,
+    ):
         """Materialize an accepted candidate into the ``Evidence`` contract."""
         from src.data.schemas import Evidence
 
@@ -532,13 +638,7 @@ class CorrelationEngine:
             [candidate.source, candidate.target]
         )
         return Evidence(
-            id=content_id(
-                "evidence",
-                candidate.relationship_type,
-                candidate.source.source_id,
-                candidate.target.source_id,
-                candidate.timestamp,
-            ),
+            id=self._evidence_id(candidate, source, target),
             source_id=candidate.source.source_id,
             source_type=candidate.source.source_type.value,
             target_id=candidate.target.source_id,
@@ -550,6 +650,33 @@ class CorrelationEngine:
             source=edge_source,
             host_id=edge_host,
         )
+
+    @staticmethod
+    def _evidence_id(
+        candidate: CorrelationCandidate,
+        source: _PreparedSignal,
+        target: _PreparedSignal,
+    ):
+        """Return the content-derived id of a materialized evidence link.
+
+        This is the identifier :func:`content_id` produces for
+        ``("evidence", relationship_type, source_id, target_id, timestamp)``,
+        computed from the cached canonical strings so that making the pair
+        sweep faster cannot change an identifier.
+        """
+        relationship = candidate.relationship_type
+        reference_iso = (
+            source.timestamp_iso
+            if source.timestamp <= target.timestamp
+            else target.timestamp_iso
+        )
+        payload = (
+            "'evidence'|"
+            f"{type(relationship).__name__}:{relationship.value}|"
+            f"{source.uuid_str}|{target.uuid_str}|"
+            f"{reference_iso}"
+        )
+        return content_id_from_canonical(payload)
 
 
 def correlate_signals(

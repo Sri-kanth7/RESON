@@ -18,6 +18,23 @@ document says so explicitly.
 | Windows | `src/data/windows_collector.py` | Yes | **No** | No Windows machine was available |
 | macOS | `src/data/macos_collector.py` | Yes | **No** | No macOS machine was available |
 
+### System-event collection
+
+Every platform also has an **event collector**, selected by the same platform
+resolution:
+
+| Platform | Module | Source | Platform-validated |
+|---|---|---|---|
+| Windows | `src/data/windows_event_log.py` | `windows_local` | No |
+| Linux | `src/data/linux_journal.py` | `linux_local` | **Partially** — the real `journalctl` binary was invoked on this machine (it has no journal entries, so no record was read) |
+| macOS | `src/data/macos_unified_log.py` | `macos_local` | No |
+
+All three apply the same guarantees: an explicit allowlist, a bounded time
+window, a record limit, stable record identifiers, checkpoint de-duplication,
+and honest error reporting. The shared implementation lives in
+`src/data/system_event_log.py`; the platform-specific readers are separate
+modules so that one platform's tooling can never break another.
+
 All three collectors implement the same `Collector` interface
 (`src/data/collector.py`) and are selected by
 `src/data/collector_factory.py`, which imports each platform module lazily.
@@ -100,7 +117,7 @@ Stop with `Ctrl+C` (the agent handles `SIGINT` and `SIGTERM`).
 | Processes | Yes | PID, name, CPU, RSS, status |
 | Battery | Yes | Present/absent is reported honestly; a desktop reports "not applicable" |
 | Sensors | Yes | hwmon temperatures (°C) and fan speeds (RPM); empty when the hardware exposes none |
-| System events | Not implemented | Linux uses journald/syslog; the Windows event-log collector is Windows-only |
+| System events | Yes | Bounded, allowlisted, deduplicated systemd-journal collection (`src/data/linux_journal.py`) |
 
 ### Known limitations
 
@@ -114,6 +131,36 @@ Stop with `Ctrl+C` (the agent handles `SIGINT` and `SIGTERM`).
   rather than a placeholder.
 * **Swap of `0` is a genuine zero**, not "unavailable": a machine with no
   swap configured really does have zero swap.
+
+### Linux system-event collection
+
+Event collection is enabled with `--events` (or `collect_events=True` in the
+agent configuration) and reads the systemd journal through `journalctl`. It
+behaves like the Windows and macOS collectors:
+
+* **Allowlist only.** By default it reads a small set of units and syslog
+  identifiers (`kernel`, `sshd.service`, `systemd-networkd.service`,
+  `systemd-resolved.service`, `cron.service`, `dbus.service`), and within
+  them only the `emerg`/`alert`/`crit`/`err` priorities. The list is in
+  `src/data/linux_journal.py` and is configurable. The whole journal is never
+  ingested.
+* **Bounded.** Each collection is limited to a recent time window (60 minutes
+  by default) and a maximum number of records (200 by default). The
+  `journalctl` query itself carries the same window, priority floor and
+  record limit.
+* **Deduplicated.** Each entry is identified by the journal's own stable
+  cursor, and a checkpoint file records what has already been ingested, so a
+  restart does not re-ingest the same entries.
+* **Permission aware.** If the journal cannot be read (no journal on the
+  machine, insufficient privileges, no `journalctl` binary), the failure is
+  reported explicitly with the reason. RESON never presents "could not read"
+  as "there were no events".
+* **Content-minimal.** Only the entry's own message text is kept, truncated
+  to a bounded length.
+
+> **A machine without systemd has no journal.** The collector then reports
+> "collection unavailable" with the reason — it never reports "no events" as
+> if the machine were healthy.
 
 ### Validation evidence
 
@@ -268,16 +315,40 @@ python -m src.data.agent --backend sqlite --interval 5
 | Processes | Yes | PID, name, CPU, RSS, status |
 | Battery | Yes | Present/absent reported honestly (a Mac mini has none) |
 | Sensors | **No** | macOS hides CPU/GPU temperatures from unprivileged processes. The capability is reported as `False` and RESON returns an empty set rather than a fabricated reading. |
-| System events | Not implemented | The macOS unified log is not read yet; the Windows event-log collector is Windows-only |
+| System events | Yes | Bounded, allowlisted, deduplicated unified-log collection (`src/data/macos_unified_log.py`) |
 
-### Known limitations
+### macOS unified-log collection
+
+Event collection is enabled with `--events` (or `collect_events=True` in the
+agent configuration) and reads the unified log through the system's `log`
+command. It behaves like the Windows and Linux collectors:
+
+* **Allowlist only.** By default it reads a small set of processes
+  (`kernel`, `loginwindow`, `mDNSResponder`), and within them only the
+  `Error` and `Fault` message types. The list is in
+  `src/data/macos_unified_log.py` and is configurable.
+* **Bounded.** Each collection is limited to a recent time window (60 minutes
+  by default) and a maximum number of records (200 by default). The `log show`
+  query itself carries the same predicate.
+* **Deduplicated.** Each entry gets a stable identifier derived from its own
+  content, and a checkpoint file records what has already been ingested, so a
+  restart does not re-ingest the same entries.
+* **Permission aware.** If the unified log cannot be read, the failure is
+  reported explicitly with the reason. RESON never presents "could not read"
+  as "there were no events".
+* **Content-minimal.** Only the entry's own message text is kept, truncated
+  to a bounded length.
+
+### Known limitations (macOS)
 
 * **Platform validation is pending.** The implementation is complete and
   covered by the shared test suite, but no real macOS run has been performed.
 * **No temperature sensors.** This is an operating-system restriction, not a
   RESON limitation. RESON reports the capability as unsupported so the
   dashboard shows "not available" instead of a made-up number.
-* **No unified-log collection yet.**
+* **The unified log needs the `log` command.** It ships with macOS, but a
+  machine without it reports the collection as unavailable rather than as
+  "no events".
 
 ---
 
@@ -302,10 +373,14 @@ To convert "implemented" into "validated" for Windows or macOS:
 ```bash
 # 1. The implementation tests must pass.
 python -m pytest -q tests/test_collector.py tests/test_platform_collectors.py \
-    tests/test_windows_event_log.py tests/test_agent.py
+    tests/test_windows_event_log.py tests/test_platform_event_logs.py \
+    tests/test_agent.py
 
 # 2. The collector must gather real data on that machine.
 python -m src.data.agent --backend sqlite --once
+
+# 2b. The system-event collector must run on that machine too.
+python -m src.data.agent --backend sqlite --once --events
 
 # 3. The stored records must carry the right provenance.
 python -c "
@@ -313,6 +388,7 @@ import sqlite3, os
 conn = sqlite3.connect(os.environ['RESON_SQLITE_PATH'])
 print(conn.execute('SELECT source, COUNT(*) FROM metrics GROUP BY source').fetchall())
 print(conn.execute('SELECT DISTINCT host_id FROM metrics').fetchall())
+print(conn.execute('SELECT source, COUNT(*) FROM events GROUP BY source').fetchall())
 "
 
 # 4. The dashboard must render every page in every mode.

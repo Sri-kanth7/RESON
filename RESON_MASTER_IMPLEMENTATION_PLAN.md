@@ -1,12 +1,16 @@
 # RESON Master Implementation Plan
 
 **Project:** RESON — System Observability & Incident Intelligence Platform
-**Branch:** `main` | **HEAD:** `97361fa feat: complete RESON observability platform with telemetry provenance` (pushed to `origin/main`)
-**Working tree:** clean
+**Branch:** `main` | **HEAD:** `97361fa feat: complete RESON observability platform with telemetry provenance` (pushed to `origin/main`), plus the 2026-10-22 session described in §0.7
+**Working tree:** the 2026-10-22 changes are applied but **not committed**
 **Status:** Phases 0–4, 6–8 implemented and verified. Phase 1 task 1.6
 (local-time display), Phase 4 gap 4.5 (incident/evidence provenance) and the
 Phase 5 Supabase-provenance defect were closed in the 2026-10-21 recovery
 session. Phase 5 remote ingestion remains deliberately unimplemented.
+The 2026-10-22 session closed the technical items of the hand-off:
+the demonstration's performance, CI for the offline suite, the Linux
+journal and macOS unified-log event readers, the quick/full demonstration
+timelines, and the marker audit.
 
 > **Recovery note (2026-10-21).** This document was last edited by the
 > previous session at 06:29 UTC. Its header and §7 still described the state
@@ -126,6 +130,30 @@ user's real database.
 | Phase 6 — Cross-platform & deployment | DEPLOYMENT-READY (not deployed) | unchanged — local start re-verified |
 | Phase 7 — Testing & performance | TESTED (512 pass / 19 env failures) | **TESTED** (583 pass / 19 skipped / 0 fail) |
 | Phase 8 — Documentation | IMPLEMENTED, reports partly stale | IMPLEMENTED — reports refreshed |
+| Phase 9 — Continual improvement (2026-10-22 session) | not planned | **IMPLEMENTED** — see §0.7 |
+
+### 0.7 Continual-improvement session (2026-10-22)
+
+The hand-off `RESON_NEXT_TASKS.md` asked for two things: owner actions that
+need credentials, hardware or a hosting account, and technical tasks that
+could be done in the repository. The owner actions are still the owner's;
+the technical tasks were completed in this session.
+
+| # | Task | Result |
+|---|---|---|
+| 1 | Bound the correlation engine's pairwise work | **Done.** The bottleneck was not the pair arithmetic but the evidence write: 18,721 links were stored one row per transaction (37–102 s measured). The engine now prepares per-signal values once, and the chain is written in one batched transaction. The default demonstration now takes **0.83 s (in memory) / 1.03 s (SQLite)** against a 10 s budget. |
+| 2 | Add CI for the offline suite | **Done.** `.github/workflows/ci.yml` runs the offline suite on Python 3.11 and 3.14 with no credentials and verifies that the 19 live tests skip cleanly. |
+| 3 | Run the Supabase path against a real project | **Not possible here** — it needs credentials and a reachable project. It remains an owner action. The provenance behaviour is still covered by 10 offline tests against a fake PostgREST client. |
+| 4 | Add macOS unified-log and Linux journald event readers | **Done.** `src/data/system_event_log.py` holds the shared contract; `src/data/linux_journal.py` and `src/data/macos_unified_log.py` implement it. The agent selects the reader per platform. |
+| 5 | Add a `--scenarios` option to the standalone agent's demonstration path | **Done.** The demonstration pipeline moved to `src/data/demonstration.py` so the CLI and the dashboard share it: `--demonstrate`, `--quick` and `--scenarios` on the command line, and a **full**/**quick** control in the sidebar. |
+| 6 | Audit the remaining `Not implemented` / `Deferred` markers | **Done.** Every remaining marker is still true (remote ingestion, dashboard authentication). The markers that had become false (Linux/macOS system events) were corrected in the same pass. |
+
+Two defects were found and fixed while doing it:
+
+| # | Defect | Severity | Status |
+|---|---|---|---|
+| D9 | `save_incident` used a plain `INSERT` on SQLite and Supabase, so re-saving an incident (the dashboard's "mark as investigating" action) failed on the primary key. The in-memory backend already replaced by id. | **Product defect, persistent backends** | **Fixed** — incidents and evidence are now upserts on both backends, matching the in-memory semantics. |
+| D10 | System events were ingested with `host_id=None` and, on the Linux/macOS readers, without a source, so an event could not be attributed to a machine. | **Provenance defect** | **Fixed** — the agent falls back to the collector's host id and source. |
 
 ---
 
@@ -160,6 +188,8 @@ Telemetry transport (authenticated, future)  -->  ingestion/validation -->
 - `src/data/memory_storage.py`, `supabase_client.py`, `supabase_storage.py` — other backends. The Supabase backend probes the remote schema once per table and writes/reads/filters provenance when the columns exist.
 - `src/data/ingestion.py` — TelemetryIngestionService.
 - `src/data/collector.py` — common collector interface; `linux_collector.py`, `macos_collector.py`, `windows_collector.py`, `windows_event_log.py`; `collector_factory.py` resolves the platform.
+- `src/data/system_event_log.py` — shared system-event contract (allowlist, bounded window, record limit, stable ids, checkpoint de-duplication, honest errors); `linux_journal.py` and `macos_unified_log.py` add the Linux and macOS readers.
+- `src/data/demonstration.py` — the deterministic demonstration pipeline and its full/quick timeline profiles, shared by the dashboard and the CLI.
 - `src/data/agent.py` — standalone collector agent (`python -m src.data.agent`).
 - `src/data/host_identity.py` — stable, non-secret host id.
 - `src/data/monitoring.py` — source inventory, derived collector status, mode resolution, process/volume/interface inventories.
@@ -274,6 +304,7 @@ Tasks:
 7. `2.8` [DONE] `src/data/host_identity.py` — stable, non-secret host id (hashed machine identifier, `RESON_HOST_ID` override), never a username/path/IP. `src/data/collector_factory.py` — platform resolution with lazy per-platform imports.
 8. `2.9` [DONE] App now uses the platform factory (no longer hardcodes Windows), so a Linux/macOS host is no longer mislabelled as `windows_local`.
 9. Tests: `tests/test_collector.py` (23), `tests/test_platform_collectors.py` (18), `tests/test_windows_event_log.py` (20), `tests/test_agent.py` (15) — 76 new tests, all passing.
+10. `2.10` [DONE - 2026-10-22] System-event collection on all three platforms. The shared contract lives in `src/data/system_event_log.py` (allowlist, bounded window, record limit, stable identifiers, checkpoint de-duplication, permission-aware errors); the platform readers are `windows_event_log.py`, `linux_journal.py` (`journalctl`) and `macos_unified_log.py` (`log show`). The agent selects the reader per platform. 29 new tests (`tests/test_platform_event_logs.py`) plus 3 in `tests/test_agent.py`.
 - **Status:** TESTED (Linux platform-validated; Windows/macOS implementation complete, platform validation pending hardware)
 
 ### Phase 3 — Professional observability dashboard
@@ -329,7 +360,7 @@ Tasks:
 
 Tasks:
 1. `7.1`–`7.3` [DONE] Unit, integration, and regression tests added for: source classification, source-aware queries, legacy NULL sources, timezone normalization and DST boundaries, schema migrations (v1→v4, idempotent, non-destructive), concurrent SQLite access, rollback, collector lifecycle, sampling policy, Windows event allowlist/dedup/checkpoint, agent retention, mode resolution, incident/evidence provenance, and dashboard rendering. See §8.
-2. `7.4` [PARTIAL] The Windows- and macOS-specific logic is exercised with mocked `psutil` and passes on any platform, but no real Windows or macOS run occurred in this environment. CI was not available here.
+2. `7.4` [PARTIAL] The Windows- and macOS-specific logic is exercised with mocked `psutil` and passes on any platform, but no real Windows or macOS run occurred in this environment. The Linux journal reader was run against the real `journalctl` binary (this container has no journal entries, so no record was read; the reader reported "no events", not an error). **CI now exists** — `.github/workflows/ci.yml` (added 2026-10-22) runs the offline suite on Python 3.11 and 3.14 with no credentials and verifies that the 19 live integration tests skip cleanly.
 3. `7.5` [DONE] `scripts/benchmark.py` measures collector overhead, SQLite ingestion throughput, query latency (bounded and unbounded), the dashboard-optimized indexed reads, telemetry volume under the sampling policy, and retention pruning. See §8b for the actual numbers. No benchmark is invented.
 4. `7.6` [DONE - corrected 2026-10-21] The 19 pre-existing failures are classified as *missing secret / external network dependency*, not product defects. The 19 live Supabase integration tests now carry a `requires_supabase` marker: they are **skipped with an explicit reason** when `SUPABASE_URL`/`SUPABASE_SECRET_KEY` are absent, and run in full when the credentials are present. Their assertions are unchanged — no assertion was weakened or deleted. **Correction to the earlier wording in this document:** the earlier text said "No assertion was weakened or skipped to obtain a green suite". The *assertions* were indeed not weakened, but the 19 tests **are** now skipped when credentials are absent; that is what turns 19 failures into 19 skips. The offline suite passes completely.
 - **Status:** TESTED
@@ -386,9 +417,11 @@ See §16 of the directive.
 | Remote ingestion | Auth/authz/validation/tenant isolation tested before enabling | NOT_STARTED | Deliberately not implemented; the hosted mode reports "unavailable" rather than faking it |
 | Multi-host isolation | Tenant cannot access another tenant's data | BLOCKED | Depends on remote ingestion; blocked behind Phase 5 |
 | Privacy | Sensitive collection/transmission minimized + documented | IMPLEMENTED | `docs/security_and_privacy.md`; no cmdline/env/payload/credential collection; transmission off by default |
-| Performance | Measurements exist; no invented benchmarks | TESTED | `scripts/benchmark.py` — see §8b |
-| Tests | Failures accurately classified | TESTED | 583 pass / 0 fail / 19 skipped (live Supabase integration, explicit reason) |
+| Performance | Measurements exist; no invented benchmarks | TESTED | `scripts/benchmark.py` — see §8b, including the default demonstration timeline (§7 of the benchmark) |
+| Tests | Failures accurately classified | TESTED | 639 pass / 0 fail / 19 skipped (live Supabase integration, explicit reason) |
 | Documentation | Matches implementation | IMPLEMENTED | README + 6 new docs; limitations listed explicitly; unimplemented features documented as unavailable |
+| Continuous integration | A regression cannot reach `main` unnoticed | IMPLEMENTED | `.github/workflows/ci.yml` — offline suite on Python 3.11 and 3.14, no credentials; the 19 live tests verified to skip cleanly |
+| System events on every platform | The same bounded, allowlisted, deduplicated collection on Windows, Linux and macOS | IMPLEMENTED / TESTED | `src/data/system_event_log.py` + three platform readers; 32 tests; the Linux `journalctl` binary was invoked on real hardware |
 | Git state | No unauthorized commit/push/reset/clean/history rewrite | IMPLEMENTED | No commit, push, reset, clean, stash, or history rewrite performed |
 
 ---
@@ -404,7 +437,7 @@ See §16 of the directive.
 | Phase 4 — Incident intelligence | IMPLEMENTED / TESTED | Existing deterministic pipeline retained and re-verified; **the incident-provenance gap (4.5) is closed** — incidents and evidence carry `source`/`host_id` end to end |
 | Phase 5 — Multi-host & hosted | PARTIAL | Stable hashed host identity + provenance done in all three backends; **remote ingestion deliberately not implemented** — hosted mode reports "unavailable" |
 | Phase 6 — Cross-platform & deployment | DEPLOYMENT-READY | `.streamlit/config.toml`, `requirements.txt`, `Procfile`; `docs/cross_platform.md`; `docs/deployment.md`; local start verified; **not deployed** (owner action) |
-| Phase 7 — Testing & performance | TESTED | 583 pass / 19 skipped (classified environmental) / 0 failed; `scripts/benchmark.py` with measured numbers (§8b) |
+| Phase 7 — Testing & performance | TESTED | 639 pass / 19 skipped (classified environmental) / 0 failed; `scripts/benchmark.py` with measured numbers (§8b); **CI added 2026-10-22** |
 | Phase 8 — Documentation | IMPLEMENTED | README rewritten; `docs/architecture.md`, `docs/deployment.md`, `docs/cross_platform.md`, `docs/security_and_privacy.md`, `docs/telemetry_sources.md`, `docs/troubleshooting.md`; `RESON_DEPLOYMENT_READINESS_REPORT.md` |
 
 ---
@@ -417,8 +450,10 @@ See §16 of the directive.
 |---|---|
 | Baseline `python -m pytest -q` (before any change) | **379 passed, 19 failed** (all 19: missing `SUPABASE_URL`) |
 | Recovery baseline `python -m pytest -q` (2026-10-21, before the recovery work) | **512 passed, 19 failed** (the same 19: missing `SUPABASE_URL`) |
-| Final `python -m pytest -q` | **583 passed, 19 skipped, 0 failed** |
-| Offline suite (`--ignore=tests/test_storage.py --ignore=tests/test_supabase_connection.py`) | **583 passed, 5 skipped, 0 failed** |
+| Final `python -m pytest -q` (2026-10-21) | **583 passed, 19 skipped, 0 failed** |
+| Offline suite (`--ignore=tests/test_storage.py --ignore=tests/test_supabase_connection.py`) (2026-10-21) | **583 passed, 5 skipped, 0 failed** |
+| Final `python -m pytest -q` (2026-10-22, after the performance/CI/event-reader work) | **639 passed, 19 skipped, 0 failed** |
+| Offline suite (2026-10-22) | **639 passed, 5 skipped, 0 failed** |
 
 The 19 baseline failures were **missing secret / external network
 dependency**, not product defects. They are now handled correctly: the live
@@ -454,6 +489,17 @@ implementation.
 | `tests/test_sqlite_storage.py` | +14 | Migrations, source-aware queries, unknown-source matching, dashboard-optimized reads, schema-version recording |
 | `tests/test_streamlit_app.py` | +7 | All pages, all modes, mode banner, hosted-mode honesty, display-timezone control |
 
+#### Tests added in the 2026-10-22 session
+
+| File | Tests | Covers |
+|---|---|---|
+| `tests/test_correlation_equivalence.py` | 4 | A recorded digest of **every** decision the correlation engine makes (factors, strengths, accept/reject, explanations, content-derived identifiers), so the performance work cannot change an outcome |
+| `tests/test_demonstration_performance.py` | 5 | The demonstration's wall clock against a 10 s budget; the batched and per-row evidence writes store the same records; re-saving an incident updates it |
+| `tests/test_demonstration_profiles.py` | 9 | The full/quick timeline profiles, the explicit scenario list, and that the quick run still detects incidents |
+| `tests/test_platform_event_logs.py` | 29 | The Linux journal and macOS unified log: allowlists, bounding, deduplication, checkpointing, parsing, error handling, per-platform reader selection, and a live run against the real `journalctl` |
+| `tests/test_agent.py` | +7 | System-event ingestion with provenance, a failed event read not stopping metric collection, the platform-selected event reader, and the `--demonstrate` / `--quick` / `--scenarios` command line |
+| `tests/test_streamlit_app.py` | +2 | The sidebar's quick/full demonstration control and that the quick run is labelled |
+
 ### 8c. Performance — measured, not invented
 
 Produced by `python scripts/benchmark.py` on this machine (Linux container,
@@ -475,6 +521,8 @@ Python 3.14.2, SQLite 3.45.1, 22,000 metric rows in the test table).
 | Retention pruning | 27,000 rows in **0.195 s** |
 | Telemetry volume, unfiltered | ~129 records/cycle |
 | Telemetry volume, with the default sampling policy | **15.8 records/cycle → 272,160 records/day at a 5 s interval** (down from ~2.2M/day unfiltered) |
+| Default demonstration timeline (15 batches, 194 signals, **18,721 candidate pairs**, 18,721 accepted links) | **0.83 s in memory / 1.03 s on SQLite** (was 37–102 s before the 2026-10-22 fix) |
+| Quick demonstration timeline (5 batches) | **0.06 s** |
 
 The remaining slow paths are genuine full scans; the UI bounds them with an
 explicit time window, and the overview uses the indexed reads.
@@ -490,6 +538,9 @@ explicit time window, and the overview uses the indexed reads.
 | All 4 monitoring modes rendered via `AppTest` | **no exceptions** |
 | All 8 pages rendered with a **non-UTC** display timezone | **no exceptions** (`tests/test_streamlit_app.py::test_pages_render_in_a_non_utc_display_timezone`) |
 | `python -m src.data.agent --backend sqlite --once` | **97 real metric records ingested** with `source=linux_local` and the stable hashed host id (re-verified 2026-10-21) |
+| `python -m src.data.agent --backend sqlite --once --events` | runs on Linux; the container has no journal entries, so 0 events were collected and **no error was reported** (2026-10-22) |
+| `python -m src.data.agent --backend sqlite --demonstrate` | 278 simulated records, 1 incident, `timeline=full` (2026-10-22) |
+| `python -m src.data.agent --backend sqlite --demonstrate --quick` | 91 simulated records, 1 incident, `timeline=quick`, 0.06 s (2026-10-22) |
 | Demonstration pipeline provenance | the incident and all 18,915 evidence links carry `source="simulation"`; `get_incidents(source="linux_local")` returns `[]` |
 | Secret scan across the repository | **no secrets found**; no `.env` present |
 | Test isolation | tests write only to `tmp_path`; the user data directory is left clean |
@@ -501,8 +552,9 @@ explicit time window, and the overview uses the indexed reads.
 | Platform | Python version | Validated? | Evidence | Notes |
 |---|---|---|---|---|
 | Linux (dev) | 3.14.2 | **Yes (Linux collector)** | `tests/test_platform_collectors.py` (18 passed, incl. live smoke test); `python -m src.data.agent --once` ingested 80 real metric records with `source=linux_local`; real CPU/mem/swap/disk/network/process/battery/sensor values observed | This is genuine platform validation of the Linux collector. |
+| Linux (event collection) | 3.14.2 | **Partially** | `python -m src.data.agent --once --events` ran the real `journalctl` binary; this container has no journal entries, so no record was read and no error was reported | The reader is proven to invoke the real tool and to report "no events" honestly. It has not read a real journal entry on this machine. |
 | Windows | — | Implementation complete, **validation pending** | `src/data/windows_collector.py` (refactored, disk/network/battery/sensors added), `src/data/windows_event_log.py` (20 offline tests passing) | No Windows machine available in this environment. Collector logic is cross-platform `psutil` and is exercised by the shared test suite, but no real Windows run has occurred. |
-| macOS | — | Implementation complete, **validation pending** | `src/data/macos_collector.py` (18 shared platform tests passing) | No macOS machine available in this environment. |
+| macOS | — | Implementation complete, **validation pending** | `src/data/macos_collector.py` (18 shared platform tests passing), `src/data/macos_unified_log.py` (unified-log reader, offline tests passing) | No macOS machine available in this environment. |
 
 Per §6.4/§11.1: OS support is not claimed until validated on that OS. Windows and macOS are documented as *implemented, platform validation pending*.
 
@@ -578,16 +630,17 @@ Every stored record carries a real source and the stable hashed host identity.
 | **`Incident`/`Evidence` source column** | **Closed 2026-10-21** | Was deferred as a schema + migration + detector change | Implemented: schema fields, pipeline propagation, SQLite migration v4, storage filters, UI display; verified by `tests/test_incident_provenance.py` (22 tests) |
 | **Local-timezone display** | Closed 2026-10-21 | Was deferred | `src/common/timeutil.py` + dashboard integration now render stored UTC in a selectable, always-named display zone. Verified by 34 tests and by an AppTest run of all 8 pages in a non-UTC zone |
 | **Supabase backend provenance** | **Closed 2026-10-21** | Was an open defect (see §0.4 D1/D2) | The production backend now stores, returns and filters provenance; the remote schema is probed once per table and any limitation is reported, never hidden |
-| **macOS / Linux system-event collection** | Deferred | The Windows event-log collector is Windows-specific | Documented as unsupported in `docs/cross_platform.md`; the collector interface already supports a per-platform event reader |
-| **CI configuration** | Deferred | No CI provider was available in this environment | The offline suite is self-contained and runs anywhere with `pytest` |
+| **macOS / Linux system-event collection** | **Closed 2026-10-22** | Was deferred: the Windows event-log collector is Windows-specific | The shared contract is in `src/data/system_event_log.py`; the systemd journal and the macOS unified log are now read with the same allowlist, bounds, stable ids, checkpoint de-duplication and honest error reporting. The agent selects the reader per platform. |
+| **CI configuration** | **Closed 2026-10-22** | Was deferred: no CI provider was available in this environment | `.github/workflows/ci.yml` runs the offline suite on Python 3.11 and 3.14 with no credentials and verifies that the 19 live integration tests skip cleanly. It has never been executed by a CI provider from this environment — the workflow file is the deliverable, and the exact commands it runs were run locally. |
+| **The demonstration took ~1 minute** | **Closed 2026-10-22** | Was the top technical item of the hand-off | The evidence chain is written in one batched transaction and the engine prepares per-signal values once. 37–102 s → 0.83–1.03 s, with every decision pinned by a recorded digest. |
 
 ---
 
 ## 12. Exact Next Action
 
-**The implementation is committed and pushed.** `RESON_NEXT_TASKS.md` holds
-the prioritised hand-off for the next working session; this section states
-the priority order at a glance.
+**The technical items of the hand-off are complete.** `RESON_NEXT_TASKS.md`
+lists what was done in the 2026-10-22 session; this section states the
+priority order at a glance.
 
 **Owner action required — the implementation is complete for every phase that
 can be completed without Windows/macOS hardware, a Supabase project, or
@@ -595,32 +648,33 @@ hosting credentials.**
 
 In priority order:
 
-1. **Review the committed work.** Commit `97361fa` is on `origin/main`. The
-   pre-existing report files are now tracked, so they are preserved in
-   history.
-2. **Bound the correlation engine's pairwise work** (§12.1): the default
-   demonstration timeline takes ~53 s because it evaluates ~18,900 signal
-   pairs. A 5-batch timeline takes ~0.06 s. The result must not change.
-3. **Validate Windows and/or macOS on real hardware** — follow
+1. **Review the work.** Commit `97361fa` is on `origin/main`; the 2026-10-22
+   changes are in the working tree and are described in
+   `RESON_SESSION_2026-10-22_REPORT.md`. Nothing was reset, cleaned,
+   stashed, or rewritten.
+2. **Validate Windows and/or macOS on real hardware** — follow
    `docs/cross_platform.md` §6. That converts those platforms from
    *implemented, validation pending* to *validated* and is the only thing
-   standing between the current state and full cross-platform support.
-4. **Deploy the hosted dashboard** — follow `docs/deployment.md` §2–§3. The
+   standing between the current state and full cross-platform support. The
+   journal and unified-log readers need it too.
+3. **Deploy the hosted dashboard** — follow `docs/deployment.md` §2–§3. The
    artifacts are in place. Verify the demonstration mode is labeled and that
    hosted real monitoring correctly reports "unavailable" until remote
    ingestion exists.
-5. **Add the provenance columns to an existing Supabase project** —
+4. **Add the provenance columns to an existing Supabase project** —
    `docs/deployment.md` §3.4. Until then the backend reports that it cannot
    attribute records, and the dashboard shows them as `unknown`.
+5. **Run the Supabase path against a real project** — it has never been
+   executed against one. With real credentials the 19 currently-skipped
+   tests must pass; a metric round trip must preserve `source`/`host_id`; a
+   source-filtered query must return only that source; and the schema probe
+   must detect a table without the provenance columns.
 6. **Decide on remote ingestion.** It is the only unimplemented functional
    capability. `docs/deployment.md` §6 lists the eleven requirements that must
    be met and tested before it may be enabled.
-7. **Optional follow-ups**, in order of value: add CI for the offline suite;
-   add macOS unified-log and Linux journald event readers; run the Supabase
-   path against a real project (it has never been executed against one).
 
-On resuming work: reread this plan and `RESON_NEXT_TASKS.md`, re-verify the
-Git state (`git status`, `git diff HEAD --stat`, `git log --oneline -1` —
-**not** `git status` alone, see §0.2), run `python -m pytest -q` to
-re-establish the test baseline, and continue from the first incomplete item
-above.
+On resuming work: reread this plan and `RESON_SESSION_2026-10-22_REPORT.md`,
+re-verify the Git state (`git status`, `git diff HEAD --stat`,
+`git log --oneline -1` — **not** `git status` alone, see §0.2), run
+`python -m pytest -q` to re-establish the test baseline, and continue from
+the first incomplete item above.

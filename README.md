@@ -88,6 +88,10 @@ src/
     windows_collector.py      Windows telemetry
     macos_collector.py        macOS telemetry
     windows_event_log.py      Bounded, allowlisted, deduplicated Windows events
+    system_event_log.py       Shared event-collection contract (allowlist, bounds, checkpoint)
+    linux_journal.py          Bounded, allowlisted, deduplicated systemd-journal events
+    macos_unified_log.py      Bounded, allowlisted, deduplicated unified-log events
+    demonstration.py          The deterministic demonstration pipeline (full / quick timelines)
     host_identity.py          Stable, non-secret, hashed host identifier
     agent.py                  Standalone collector agent (CLI entry point)
     monitoring.py             Source-aware queries + honest status derivation
@@ -149,13 +153,37 @@ python -m src.data.agent --backend sqlite --interval 5 --retention-days 30
 | `--backend` | `sqlite` (default, persistent local file), `memory`, `supabase` |
 | `--interval` | Seconds between cycles (minimum 1.0) |
 | `--retention-days` | Delete telemetry older than this; `0` disables pruning |
-| `--events` | Also collect Windows system events (Windows only) |
+| `--events` | Also collect operating-system system events (Windows Event Log, systemd journal, macOS unified log) |
 | `--platform` | Override the platform (`windows`, `linux`, `macos`) |
 | `--host-id` | Override the stable host identifier |
 | `--once` | Run one cycle and exit (verification) |
+| `--demonstrate` | Run the deterministic demonstration pipeline once and exit |
+| `--quick` | With `--demonstrate`: use the short 5-batch timeline instead of the full 15-batch one |
+| `--scenarios` | With `--demonstrate`: an explicit comma-separated scenario timeline |
 
 Stop the agent with `Ctrl+C`; it handles `SIGINT`/`SIGTERM` and shuts the
 collector down cleanly.
+
+### Run the demonstration
+
+The same deterministic demonstration the dashboard runs is available from the
+command line:
+
+```bash
+# The full 15-batch timeline
+python -m src.data.agent --backend sqlite --demonstrate
+
+# The quick 5-batch timeline (a fraction of the time, still detects incidents)
+python -m src.data.agent --backend sqlite --demonstrate --quick
+
+# An explicit scenario timeline
+python -m src.data.agent --backend sqlite --demonstrate \
+    --scenarios normal,normal,normal,error_spike,normal
+```
+
+Everything it writes is tagged `source="simulation"` and is never presented
+as live telemetry. In the dashboard, the sidebar offers the same **full** and
+**quick** timelines next to the **Run Local Demonstration Analysis** button.
 
 ### Verify a collection
 
@@ -226,7 +254,7 @@ are unchanged and run in full when the credentials are present.
 Everything else runs offline against the SQLite and in-memory backends:
 
 ```
-512 passed, 19 skipped
+639 passed, 19 skipped
 ```
 
 No assertion was weakened or skipped to make the suite green — the skips are
@@ -301,8 +329,7 @@ Remote transmission is off by default and is not implemented. Full detail:
 | Windows and macOS platform validation | **Pending** — implemented and unit-tested, but never run on real Windows/macOS hardware |
 | Remote (hosted) ingestion | **Not implemented** — hosted real monitoring reports "unavailable" |
 | Dashboard authentication / tenant isolation | **Not implemented** — a public deployment exposes whatever its backend holds |
-| macOS unified log collection | **Not implemented** — the Windows event-log collector is Windows-only |
-| Linux/macOS system event collection | **Not implemented** |
+| Windows/macOS system-event collection on real hardware | **Platform validation pending** — the journal (Linux) and unified-log (macOS) readers are implemented and tested offline; only the Linux journal reader has been run against the real binary |
 | Provenance columns on an existing Supabase project | **Owner action** — a project created before the provenance columns cannot attribute records; the backend detects this, reports it, and refuses to filter by a column it does not have |
 | Supabase live integration tests | Require credentials; skipped with an explicit reason when absent |
 | Browser automation | Not present — the dashboard is verified with Streamlit's `AppTest` harness |

@@ -9,6 +9,7 @@ Usage::
 
     python -m src.data.agent --backend sqlite --interval 5
     python -m src.data.agent --backend sqlite --retention-days 30 --events
+    python -m src.data.agent --backend sqlite --demonstrate --quick
 
 The agent is deliberately conservative:
 
@@ -64,7 +65,11 @@ class AgentConfig:
     retention_days: int | None = 30
     """Retention window in days. ``None`` disables retention pruning."""
     collect_events: bool = False
-    """Whether to collect Windows system events (Windows only)."""
+    """Whether to collect operating-system system events.
+
+    The reader is platform specific: the Windows Event Log, the systemd
+    journal on Linux, the unified log on macOS.
+    """
     event_window_minutes: int = 60
     """Maximum age of a collected system event, in minutes."""
     event_max_records: int = 200
@@ -284,9 +289,14 @@ class CollectorAgent:
         if not self._config.collect_events:
             return
         if self._event_collector is None:
-            from src.data.windows_event_log import WindowsEventLogCollector
+            from src.data.collector_factory import create_event_collector
 
-            self._event_collector = WindowsEventLogCollector(
+            # The event reader is platform specific: the Windows Event Log,
+            # the systemd journal, the macOS unified log. All of them apply
+            # the same guarantees (allowlist, bounded window, record limit,
+            # stable identifiers, checkpoint de-duplication, honest errors).
+            self._event_collector = create_event_collector(
+                platform_name=self._config.platform,
                 host_id=self._collector.host_id,
                 source=self._collector.source,
                 window_minutes=self._config.event_window_minutes,
@@ -313,8 +323,11 @@ class CollectorAgent:
                     event_type=map_event_type(record.event_id),
                     description=record.message or record.record_id,
                     metadata=record.as_metadata(),
-                    source=record.source,
-                    host_id=record.host_id,
+                    # The collector's identity is the fallback: a reader that
+                    # does not stamp the host id must not produce an event
+                    # that cannot be attributed to a machine.
+                    source=record.source or self._collector.source,
+                    host_id=record.host_id or self._collector.host_id,
                 )
             )
         if events:
@@ -449,8 +462,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--events",
         action="store_true",
         help=(
-            "Also collect Windows system events (Windows only; ignored on "
-            "other platforms)."
+            "Also collect operating-system system events (Windows Event Log, "
+            "systemd journal on Linux, unified log on macOS). The collection "
+            "is allowlisted, bounded and deduplicated."
         ),
     )
     parser.add_argument(
@@ -492,12 +506,104 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run a single collection cycle and exit (useful for testing).",
     )
+    parser.add_argument(
+        "--demonstrate",
+        action="store_true",
+        help=(
+            "Run the deterministic demonstration pipeline once and exit. The "
+            "simulated telemetry is stored under the 'simulation' source and "
+            "is never presented as live telemetry."
+        ),
+    )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help=(
+            "With --demonstrate: use the short timeline (5 batches) instead "
+            "of the full one (15 batches). It runs the identical pipeline "
+            "over a smaller window and is much faster."
+        ),
+    )
+    parser.add_argument(
+        "--scenarios",
+        default=None,
+        help=(
+            "With --demonstrate: an explicit comma-separated scenario "
+            "timeline (for example 'normal,normal,error_spike,normal'). "
+            "Overrides --quick."
+        ),
+    )
     return parser
+
+
+def _demonstration_scenarios(args) -> tuple[str, ...] | None:
+    """Return the scenario timeline requested on the command line."""
+    from src.data.demonstration import resolve_scenarios
+
+    if args.scenarios:
+        requested = tuple(
+            part.strip()
+            for part in str(args.scenarios).split(",")
+            if part.strip()
+        )
+        if not requested:
+            raise ValueError(
+                "--scenarios was given but no scenario name could be read "
+                "from it."
+            )
+        return resolve_scenarios(requested)
+    if args.quick:
+        return resolve_scenarios(profile="quick")
+    return resolve_scenarios(profile="full")
+
+
+def _run_demonstration(args) -> int:
+    """Run the demonstration pipeline from the command line."""
+    from src.data.demonstration import run_demonstration
+    from src.orchestrator import create_application
+
+    try:
+        scenarios = _demonstration_scenarios(args)
+    except ValueError as exc:
+        print(f"Invalid demonstration request: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        application = create_application(args.backend)
+    except Exception as exc:
+        print(f"Storage backend could not be constructed: {exc}", file=sys.stderr)
+        return 1
+
+    start = time.perf_counter()
+    demo = run_demonstration(application, scenarios=scenarios)
+    elapsed = time.perf_counter() - start
+
+    incident_count = len(demo.incident_result.researches)
+    print(
+        f"Demonstration complete: {demo.records} simulated record(s), "
+        f"{incident_count} incident(s), timeline={demo.timeline}, "
+        f"{elapsed:.2f}s."
+    )
+    print(
+        "The stored records are tagged source='simulation' and are never "
+        "presented as live telemetry."
+    )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run the collector agent from the command line."""
     args = build_parser().parse_args(argv)
+
+    if args.demonstrate:
+        return _run_demonstration(args)
+
+    if args.quick or args.scenarios:
+        print(
+            "Note: --quick and --scenarios only apply to --demonstrate; "
+            "they are ignored for a collection run.",
+            file=sys.stderr,
+        )
 
     retention: int | None = args.retention_days
     if retention is not None and retention <= 0:

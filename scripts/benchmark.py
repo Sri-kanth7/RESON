@@ -72,6 +72,69 @@ def _seed(storage, count: int, host: str = "reson-bench") -> None:
     storage.save_metrics(records)
 
 
+def _measure_demonstration() -> dict:
+    """Measure the default demonstration timeline end to end.
+
+    Reports how many signal pairs the correlation engine evaluates and how
+    long the whole demonstration takes, for the in-memory backend and for the
+    persistent SQLite backend. The pair count is a property of the data (it
+    grows with the square of the signal count), the wall clock is a property
+    of this machine.
+    """
+    import os
+
+    from app.services.backend import build_application, run_demonstration
+
+    result: dict = {}
+
+    memory_app = build_application("memory")
+    start = time.perf_counter()
+    demo = run_demonstration(memory_app)
+    result["memory_seconds"] = time.perf_counter() - start
+
+    # The SQLite run uses a throwaway database file: the benchmark never
+    # touches the user's real data directory.
+    tmp = Path(tempfile.mkdtemp())
+    previous = os.environ.get("RESON_SQLITE_PATH")
+    os.environ["RESON_SQLITE_PATH"] = str(tmp / "demonstration.db")
+    try:
+        sqlite_app = build_application("sqlite")
+        start = time.perf_counter()
+        sqlite_demo = run_demonstration(sqlite_app)
+        result["sqlite_seconds"] = time.perf_counter() - start
+    finally:
+        if previous is None:
+            os.environ.pop("RESON_SQLITE_PATH", None)
+        else:
+            os.environ["RESON_SQLITE_PATH"] = previous
+
+    incident_result = demo.incident_result
+    result["batches"] = demo.batches
+    result["records"] = demo.records
+    result["pairs"] = len(incident_result.correlation_candidates)
+    result["evidence"] = len(incident_result.correlation_evidence)
+    result["incidents"] = len(incident_result.researches)
+    result["signals"] = _signal_count(incident_result)
+
+    # Both runs must produce the same number of pairs, evidence links and
+    # incidents; a difference would mean the backend changed the outcome.
+    sqlite_result = sqlite_demo.incident_result
+    assert len(sqlite_result.correlation_candidates) == result["pairs"]
+    assert len(sqlite_result.correlation_evidence) == result["evidence"]
+    assert len(sqlite_result.researches) == result["incidents"]
+
+    return result
+
+
+def _signal_count(incident_result) -> int:
+    """Return the number of distinct signals the engine evaluated."""
+    identifiers = set()
+    for candidate in incident_result.correlation_candidates:
+        identifiers.add(candidate.source.source_id)
+        identifiers.add(candidate.target.source_id)
+    return len(identifiers)
+
+
 def main() -> int:
     print("RESON performance measurements")
     print("=" * 60)
@@ -215,6 +278,27 @@ def main() -> int:
     removed = storage.purge_before(datetime.now(timezone.utc) - timedelta(days=30))
     elapsed = time.perf_counter() - start
     print(f"   purged {removed['metrics']:,} rows in {elapsed:.3f}s")
+    print()
+
+    # ------------------------------------------------------------------
+    # 7. Default demonstration timeline (correlation pair sweep)
+    # ------------------------------------------------------------------
+    print("7. Default demonstration timeline (correlation engine)")
+    demonstration = _measure_demonstration()
+    print(f"   scenario batches:          {demonstration['batches']}")
+    print(f"   telemetry records:          {demonstration['records']:,}")
+    print(f"   signals evaluated:          {demonstration['signals']}")
+    print(f"   candidate signal pairs:     {demonstration['pairs']:,}")
+    print(f"   accepted evidence links:    {demonstration['evidence']:,}")
+    print(f"   incidents produced:         {demonstration['incidents']}")
+    print(
+        f"   wall clock (in-memory):     "
+        f"{demonstration['memory_seconds']:.2f} s"
+    )
+    print(
+        f"   wall clock (sqlite):        "
+        f"{demonstration['sqlite_seconds']:.2f} s"
+    )
     print()
 
     print("=" * 60)

@@ -139,6 +139,15 @@ class InMemoryStorage(Storage):
         self._evidence[str(evidence.id)] = evidence
         return evidence
 
+    def save_evidence_batch(self, evidence: list[Evidence]) -> list[Evidence]:
+        """Persist multiple evidence relationships in one call."""
+        if not evidence:
+            return []
+        stored = list(evidence)
+        for item in stored:
+            self._evidence[str(item.id)] = item
+        return stored
+
     def get_evidence(
         self,
         source_id: str | None = None,

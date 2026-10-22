@@ -1,13 +1,21 @@
 # RESON — Next Tasks
 
-**Date written:** 2026-10-21 (end of the recovery + continuation session)
-**Branch:** `main` · **HEAD at time of writing:** the commit that includes this file
-**Verified state:** `583 passed, 19 skipped, 0 failed` (`python -m pytest -q`)
+**Originally written:** 2026-10-21 (end of the recovery + continuation session)
+**Revised:** 2026-10-22 (after the continual-improvement session)
+**Branch:** `main` · **HEAD at time of writing:** `c10bb22 docs: record the commit, push and recovery checkpoint in the reports`, plus the uncommitted 2026-10-22 work
+**Verified state:** `639 passed, 19 skipped, 0 failed` (`python -m pytest -q`)
 
 This file is the hand-off for the next working session. It is deliberately
 separate from `RESON_MASTER_IMPLEMENTATION_PLAN.md` (the authoritative
 project record) — that document holds the phase-by-phase status and the
 evidence; this one holds only *what to do next*.
+
+> **What changed on 2026-10-22.** Every *technical* item of §2 below was
+> completed in that session; the full evidence is in
+> `RESON_SESSION_2026-10-22_REPORT.md` and in the master plan's §0.7.
+> §2 is kept, with each item marked, because it is the acceptance record for
+> that work. The *owner* items of §1 could not be done here: they need
+> hosting credentials, a Supabase project, or Windows/macOS hardware.
 
 ---
 
@@ -19,18 +27,22 @@ evidence; this one holds only *what to do next*.
   single largest remaining functional gap, and it must stay disabled until
   the security requirements in `docs/deployment.md` §6 are met *and tested*.
 * Two defects that broke the **production** (Supabase) backend were found and
-  fixed in this session — see §2. Do not assume the Supabase path is
-  well-tested: it has never run against a real Supabase project.
-* The working tree was clean at the end of the session and everything is
-  committed. `git status` should be empty.
+  fixed on 2026-10-21 — see the master plan §0.4. Do not assume the Supabase
+  path is well-tested: it has never run against a real Supabase project.
+* Two further defects were found and fixed on 2026-10-22 — see the master
+  plan §0.7 (D9, D10).
+* The 2026-10-22 changes are **in the working tree and not committed**:
+  `git status` shows the modified and new files, `git diff HEAD --stat`
+  cross-checks them.
 
 ### The three checks to run before you change anything
 
 ```bash
 cd /path/to/RESON
-git status                      # must be empty
+git status                      # expect: the 2026-10-22 changes, uncommitted
+git diff HEAD --stat            # cross-check the file list
 git log --oneline -3
-python -m pytest -q            # expect: 583 passed, 19 skipped, 0 failed
+python -m pytest -q             # expect: 639 passed, 19 skipped, 0 failed
 ```
 
 > **Warning — `git status` alone once under-reported the working tree.**
@@ -42,6 +54,9 @@ python -m pytest -q            # expect: 583 passed, 19 skipped, 0 failed
 ---
 
 ## 1. Owner actions (highest value — no code required)
+
+*None of these can be done from a development container; all of them are
+still open.*
 
 ### 1.1 Deploy the hosted dashboard — *not done, no public URL exists*
 
@@ -73,7 +88,9 @@ The exact `ALTER TABLE` statements are in `docs/deployment.md` §3.4.
 ### 1.3 Validate Windows and/or macOS on real hardware
 
 **Why:** both platforms are *implemented and unit-tested* but have **never
-run on real hardware**. RESON does not claim OS support until it does.
+run on real hardware**. RESON does not claim OS support until it does. This
+now includes the system-event readers: the Windows Event Log, the systemd
+journal and the macOS unified log.
 
 Procedure: `docs/cross_platform.md` §6. This is the only thing standing
 between the current state and full cross-platform support.
@@ -84,7 +101,20 @@ After a successful run, update:
 * `docs/cross_platform.md` (support matrix),
 * `README.md` (the limitations table).
 
-### 1.4 Decide on remote ingestion — *design decision, not a task to rush*
+### 1.4 Run the Supabase path against a real project — *unverified*
+
+**Why:** the Supabase backend was **never executed against a real Supabase
+project**. Its provenance behaviour is covered by
+`tests/test_supabase_provenance.py` against a fake PostgREST client
+(10 tests), which proves the *query construction* and the *policy*, but not
+the wire behaviour.
+
+**Acceptance:** with real credentials, the 19 currently-skipped tests pass;
+a metric round-trip preserves `source`/`host_id`; a source-filtered query
+returns only that source; and the schema probe correctly detects a table
+without the provenance columns.
+
+### 1.5 Decide on remote ingestion — *design decision, not a task to rush*
 
 Read `docs/deployment.md` §6 first. It lists the eleven requirements that
 must be met and tested **before** the path may be enabled. Enabling it
@@ -92,82 +122,93 @@ without them would expose an endpoint that accepts arbitrary telemetry.
 
 ---
 
-## 2. Technical next tasks (ordered by value)
+## 2. Technical next tasks — **COMPLETED 2026-10-22**
 
-### 2.1 Bound the correlation engine's pairwise work — *performance*
+Each item below was implemented, verified and documented. The evidence is in
+`RESON_SESSION_2026-10-22_REPORT.md`; the acceptance record is kept here.
+
+### 2.1 Bound the correlation engine's pairwise work — **DONE**
 
 **Problem (measured, not estimated).** The full default demonstration
-timeline (15 batches) produces ~18,900 candidate signal pairs and takes
-**~53 s** end to end. A 5-batch timeline produces the same *kind* of result
-in **~0.06 s**. The dashboard's "Run Local Demonstration Analysis" button
-therefore blocks for the better part of a minute.
+timeline (15 batches) produced ~18,900 candidate signal pairs and took
+**~37 s (in-memory) / ~102 s (SQLite)** end to end. A 5-batch timeline took
+~0.06 s.
 
-**Where:** `src/incidents/correlation.py` (pair evaluation), and
-`src/incidents/service.py::derive_evidence` / `analyze`.
+**Root cause found.** The pair arithmetic was not the bottleneck: the engine
+evaluated 18,721 pairs in ~0.9 s. The time went into **writing the 18,721
+accepted evidence links**, one row per transaction, each opening and
+committing its own SQLite connection.
 
-**Acceptance:**
-* the full default demonstration completes in **under 10 s**;
-* the result is **identical** — the incidents, their ids, their evidence
-  chains and their severities must not change (ids are content-derived, so
-  any change is a behaviour change, not a refactor);
-* `scripts/benchmark.py` gains a section that reports the pair count and the
-  wall-clock time for the default timeline.
+**What was done.**
+* `Storage.save_evidence_batch()` was added to the storage abstraction, with
+  an efficient `executemany` implementation for SQLite, a single-request
+  implementation for Supabase and a bulk implementation for the in-memory
+  backend. `IncidentIntelligenceService.persist()` now writes the whole
+  evidence chain in one call.
+* The correlation engine prepares every per-signal value once (service,
+  environment, metric-key set, identifier string, timestamp) instead of
+  recomputing it for each of the ~18,700 pairs it appears in.
+* `scripts/benchmark.py` gained section 7, which reports the pair count and
+  the wall clock for the default timeline.
 
-**Suggested approach:** bucket signals by time window before pairing (the
-correlation window is already 600 s), and short-circuit pairs that already
-fail a cheap factor test before the expensive ones are computed.
+**Acceptance — met.**
+* the full default demonstration completes in **under 10 s** — measured
+  **0.83 s (in-memory) / 1.03 s (SQLite)**;
+* the result is **identical** — `tests/test_correlation_equivalence.py` pins
+  every decision (all six factors, the strength, the accept/reject decision,
+  the explanation and the content-derived identifier) in a recorded digest,
+  for the default configuration *and* for a custom one. The digest was taken
+  from the engine before the optimisation and is unchanged after it;
+* `scripts/benchmark.py` reports the pair count and the wall-clock time for
+  the default timeline — **18,721 pairs, 194 signals, 15 batches**.
 
-### 2.2 Add CI for the offline suite
+### 2.2 Add CI for the offline suite — **DONE**
 
-**Why:** there is no CI in this repository, so nothing prevents a regression
-from reaching `main`.
+`.github/workflows/ci.yml` runs
+`python -m pytest -q --ignore=tests/test_storage.py --ignore=tests/test_supabase_connection.py`
+on Python 3.11 and 3.14 with no Supabase credentials, byte-compiles every
+module, and additionally runs the two ignored modules to verify that the 19
+live integration tests **skip cleanly** with an explicit reason.
 
-**Acceptance:** a workflow that runs `python -m pytest -q --ignore=tests/test_storage.py --ignore=tests/test_supabase_connection.py` on Python 3.11 and 3.14 (the versions `docs/cross_platform.md` claims support for), with no Supabase credentials — the 19 live integration tests must skip cleanly.
+The workflow file has never been executed by a CI provider from this
+environment; the exact commands it runs were executed locally and pass.
 
-### 2.3 Run the Supabase path against a real project — *unverified*
+### 2.3 Run the Supabase path against a real project — **NOT POSSIBLE HERE**
 
-**Why:** the Supabase backend was **never executed against a real Supabase
-project** in this environment. Its provenance behaviour is covered by
-`tests/test_supabase_provenance.py` against a fake PostgREST client
-(10 tests), which proves the *query construction* and the *policy*, but not
-the wire behaviour.
+This is owner item §1.4. It needs credentials and a reachable project.
 
-**Acceptance:** with real credentials, the 19 currently-skipped tests pass; a metric round-trip preserves `source`/`host_id`; a source-filtered query returns only that source; and the schema probe correctly detects a table without the provenance columns.
+### 2.4 Add macOS unified-log and Linux journald event readers — **DONE**
 
-### 2.4 Add macOS unified-log and Linux journald event readers
+**Where:** `src/data/system_event_log.py` holds the shared contract — an
+explicit allowlist, a bounded time window, a maximum number of records,
+stable record identifiers, checkpoint de-duplication, and permission-aware
+error reporting ("could not read" is never presented as "no events"). The
+platform readers are `src/data/linux_journal.py` (`journalctl`) and
+`src/data/macos_unified_log.py` (`log show`); the Windows reader keeps its
+existing implementation and now shares the same collector. The agent selects
+the reader per platform through `create_event_collector()`.
 
-**Why:** Windows has a bounded, allowlisted event collector
-(`src/data/windows_event_log.py`). The other two platforms have none, so
-`docs/cross_platform.md` lists system-event collection as unsupported there.
+**Acceptance — met.** Same guarantees as the Windows reader, a platform test
+suite that runs on any OS (29 tests in `tests/test_platform_event_logs.py`,
+plus 3 in `tests/test_agent.py`), and a platform validation note: the real
+`journalctl` binary was invoked on this machine (the container has no
+journal entries, so no record was read and no error was reported).
 
-**Where:** the collector interface already has a per-platform event-reader
-seam (`src/data/collector.py`); the Windows implementation is the reference
-for bounding, allowlisting, deduplication and the checkpoint file.
+### 2.5 Add a `--scenarios` option to the standalone agent's demonstration path — **DONE**
 
-**Acceptance:** same guarantees as the Windows reader — explicit allowlist, bounded window and record limit, stable record ids, checkpoint deduplication, permission errors surfaced honestly — with a platform test suite that runs on any OS plus a platform validation note.
+**Acceptance — met.** The demonstration pipeline moved to
+`src/data/demonstration.py` so the CLI and the dashboard run the same code.
+The sidebar offers **"Full timeline (15 batches)"** and **"Quick timeline
+(5 batches)"** next to the demonstration button, the quick run is labelled
+*"Quick simulated analysis ready"*, and it still produces an incident. The
+command line gained `--demonstrate`, `--quick` and `--scenarios`.
 
-### 2.5 Add a `--scenarios` option to the standalone agent's demonstration path
+### 2.6 Audit the remaining `NotImplemented` / `Deferred` markers — **DONE**
 
-**Why:** `run_demonstration(application, scenarios=...)` already accepts a
-shorter simulation timeline (added in this session, used by the tests).
-Exposing it through the UI and the CLI would let a user run a fast
-demonstration instead of waiting ~53 s.
-
-**Acceptance:** the sidebar's demonstration control offers "quick" and
-"full"; the quick run is labelled as such and still produces incidents.
-
-### 2.6 Audit the remaining `NotImplemented` / `Deferred` markers
-
-Run:
-
-```bash
-grep -rn "NOT IMPLEMENTED\|Not implemented\|Deferred\|TODO\|FIXME" \
-  --include=*.py --include=*.md src app docs tests
-```
-
-Each hit must still be *true*. Anything that has since been implemented
-should be corrected — the documentation must never describe a feature as
-missing when it exists, nor claim a feature exists when it does not.
+The markers that had become false (Linux/macOS system-event collection) were
+corrected in `README.md`, `docs/cross_platform.md` and
+`docs/security_and_privacy.md`. Every remaining marker is still true: remote
+ingestion, dashboard authentication and tenant isolation.
 
 ---
 
@@ -186,6 +227,13 @@ curl -s http://127.0.0.1:8501/_stcore/health     # expect: ok
 
 # Real telemetry on this machine (Linux)
 RESON_SQLITE_PATH=/tmp/reson-check.db python -m src.data.agent --backend sqlite --once
+
+# Real system events on this machine (Linux)
+RESON_SQLITE_PATH=/tmp/reson-check.db python -m src.data.agent --backend sqlite --once --events
+
+# The demonstration, full and quick
+python -m src.data.agent --backend memory --demonstrate
+python -m src.data.agent --backend memory --demonstrate --quick
 
 # Measurements (never invent a benchmark)
 python scripts/benchmark.py
@@ -213,6 +261,12 @@ git status && git diff HEAD --stat
 * **Do not run destructive tests against the user's real database.** Use
   `tmp_path` fixtures or a disposable copy; migration v4 was exercised
   against throwaway and hand-built legacy databases for exactly this reason.
+* **Do not "optimize" the correlation engine past its recorded digest.**
+  `tests/test_correlation_equivalence.py` is the contract: every factor,
+  strength, decision, explanation and identifier is pinned. A change that
+  moves the digest is a behaviour change, not a refactor — and note that
+  `sum()` uses compensated summation, so even a hand-rolled accumulation
+  changes the last bit of every strength.
 * **Do not delete the untracked report files** (`IMPLEMENTATION_SUMMARY.md`,
   `RESON_AUDIT_REVIEW_REPORT.md`, `RESON_FINAL_IMPLEMENTATION_REPORT.md`,
   `RESON_IMPLEMENTATION_REPORT.md`). They are historical project records

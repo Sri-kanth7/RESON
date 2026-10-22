@@ -31,7 +31,7 @@ that is not a reason to collect it.
 | Processes | PID, process name, CPU percent, resident set size, status | **No command-line arguments, no environment, no file handles, no user identity** |
 | Battery | Present, percent, charging, seconds remaining | Only when a battery is actually present |
 | Sensors | Temperature (°C) and fan speed (RPM) where the OS exposes them | Empty when the hardware exposes none |
-| System events | Event id, provider, channel, level, and a truncated message | Allowlisted channels and identifiers only; opt-in |
+| System events | Event id, provider, channel, level, and a truncated message | Allowlisted channels/units/processes and identifiers only; opt-in |
 
 ### What is never collected
 
@@ -177,7 +177,7 @@ These are product rules, not suggestions, and they are covered by tests:
 | No dashboard authentication | A public deployment exposes whatever its backend holds | Do not point a public deployment at private tenant data; use a private deployment or an authenticating proxy |
 | No encryption at rest | The local SQLite file is unencrypted | The file lives in the user's own data directory; use full-disk encryption at the OS level |
 | `Incident`/`Evidence` provenance on a pre-provenance Supabase project | Records written to a table without the provenance columns cannot be attributed, and are reported as `unknown` rather than as live telemetry | The backend probes the remote schema once per table, reports the limitation in the sidebar and on the Settings page, and refuses to filter by a column it does not have |
-| macOS unified log is not read | No macOS system events | Documented as unsupported in `docs/cross_platform.md` |
+| macOS unified log and Linux journal are not platform-validated | The readers are implemented and tested offline, but only the Linux `journalctl` binary has actually been invoked | Documented as *implemented, platform validation pending* in `docs/cross_platform.md`; the validation procedure is in §6 of that document |
 | No per-tenant access control in the dashboard | Not applicable to a single-user local installation | Required before any multi-user hosted deployment |
 
 ---

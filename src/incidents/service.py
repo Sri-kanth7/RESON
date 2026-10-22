@@ -265,25 +265,37 @@ class IncidentIntelligenceService:
         Incident -> Signal chain evidence and accepted correlation evidence are
         both persisted. No Phase 2 internal models are persisted and no
         Supabase call happens here.
+
+        The evidence is written in **one batched call** rather than one call
+        per link. A single analysis run can materialize tens of thousands of
+        correlation links; writing them one at a time turned a local
+        demonstration into tens of seconds of per-row transactions on the
+        SQLite backend. The set of stored records and their identifiers are
+        unchanged: the batch writes exactly the links the per-link loop wrote,
+        with the same de-duplication by evidence id.
         """
         if self._storage is None:
             return
 
         saved_evidence_ids: set[object] = set()
+        pending: list = []
 
         for research in result.researches:
             self._storage.save_incident(research.incident)
             for item in research.timeline:
                 if item.id in saved_evidence_ids:
                     continue
-                self._storage.save_evidence(item)
                 saved_evidence_ids.add(item.id)
+                pending.append(item)
 
         for item in result.correlation_evidence:
             if item.id in saved_evidence_ids:
                 continue
-            self._storage.save_evidence(item)
             saved_evidence_ids.add(item.id)
+            pending.append(item)
+
+        if pending:
+            self._storage.save_evidence_batch(pending)
 
     def historical_candidates(
         self,

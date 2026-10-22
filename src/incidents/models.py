@@ -106,6 +106,19 @@ def content_id(*parts: Any) -> UUID:
     return uuid5(RESON_PHASE3_NAMESPACE, payload)
 
 
+def content_id_from_canonical(payload: str) -> UUID:
+    """Return the deterministic UUID for an already-canonical payload.
+
+    :func:`content_id` canonicalizes every part before hashing it. A caller
+    that already holds the canonical strings (for example a cached UUID string
+    and a cached ISO-8601 timestamp) can hash them directly with this
+    function and get **exactly** the UUID :func:`content_id` would have
+    produced for the same parts. The canonical form is the only shared
+    contract; the identifier itself never changes.
+    """
+    return uuid5(RESON_PHASE3_NAMESPACE, payload)
+
+
 class IncidentIntelligenceConfig(IntelligenceModel):
     """Immutable thresholds for Phase 3 incident intelligence.
 

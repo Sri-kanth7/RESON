@@ -18,6 +18,11 @@ Design constraints (from the RESON requirements):
 * **Safe content.** Only the event's own message text is collected. RESON does
   not collect unrelated log content, credentials, or payload data.
 
+The shared parts of this contract (the record, the read result, the reader
+seam, and the collector that enforces the guarantees) live in
+:mod:`src.data.system_event_log`; the same collector backs the Linux journal
+and the macOS unified log.
+
 The module is import-safe on non-Windows systems: the Windows-specific readers
 are imported lazily and the module itself contains no Windows-only imports at
 import time.
@@ -25,15 +30,22 @@ import time.
 
 from __future__ import annotations
 
-import json
 import subprocess
-import tempfile
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.data.schemas import SOURCE_WINDOWS_LOCAL
+from src.data.system_event_log import (
+    LEVEL_CRITICAL,
+    LEVEL_ERROR,
+    LEVEL_INFORMATION,
+    LEVEL_WARNING,
+    EventLogReader,
+    EventLogReadResult,
+    SystemEventCollector,
+    SystemEventRecord,
+    truncate_message,
+)
 
 #: Channels RESON reads by default. This is an allowlist, not a wildcard.
 DEFAULT_ALLOWED_CHANNELS: tuple[str, ...] = (
@@ -43,8 +55,8 @@ DEFAULT_ALLOWED_CHANNELS: tuple[str, ...] = (
 
 #: Event identifiers considered operationally relevant, per channel.
 #:
-#: An empty tuple means "no identifier restriction for this channel", which
-#: is only used for channels whose entire content is operationally relevant.
+#: An empty tuple means "no identifier restriction for this channel", which is
+#: only used for channels whose entire content is operationally relevant.
 DEFAULT_ALLOWED_EVENT_IDS: dict[str, tuple[int, ...]] = {
     "System": (
         6005,  # Event log service started
@@ -67,12 +79,6 @@ DEFAULT_ALLOWED_EVENT_IDS: dict[str, tuple[int, ...]] = {
     ),
 }
 
-#: Severity mapping for the levels RESON understands.
-LEVEL_CRITICAL = "CRITICAL"
-LEVEL_ERROR = "ERROR"
-LEVEL_WARNING = "WARNING"
-LEVEL_INFORMATION = "INFORMATION"
-
 #: Windows severity codes mapped to RESON levels.
 _SEVERITY_MAP = {
     1: LEVEL_CRITICAL,
@@ -81,75 +87,6 @@ _SEVERITY_MAP = {
     4: LEVEL_INFORMATION,
     5: "DEBUG",
 }
-
-
-@dataclass(frozen=True)
-class SystemEventRecord:
-    """One collected system event.
-
-    ``record_id`` is stable across restarts so the same event is only ever
-    ingested once.
-    """
-
-    record_id: str
-    """Stable identifier of the event (Windows EventRecordID when available)."""
-    timestamp: datetime
-    """Event time in UTC."""
-    channel: str
-    """Event log channel the record came from (for example ``"System"``)."""
-    provider: str | None = None
-    """Event provider (source application) name, when available."""
-    event_id: int | None = None
-    """Windows event identifier, when available."""
-    level: str | None = None
-    """Normalized severity."""
-    message: str = ""
-    """Event message text (truncated to a bounded length)."""
-    source: str = SOURCE_WINDOWS_LOCAL
-    """Telemetry source tag."""
-    host_id: str | None = None
-    """Host the event was collected on."""
-
-    def as_metadata(self) -> dict:
-        """Return a bounded metadata mapping for persistence."""
-        return {
-            "channel": self.channel,
-            "provider": self.provider,
-            "event_id": self.event_id,
-            "level": self.level,
-            "record_id": self.record_id,
-        }
-
-
-@dataclass(frozen=True)
-class EventLogReadResult:
-    """Outcome of one read attempt.
-
-    ``records`` is empty and ``error`` is set when the log could not be read;
-    the caller must distinguish "no events" from "could not read".
-    """
-
-    records: tuple[SystemEventRecord, ...]
-    error: str | None = None
-    available: bool = True
-
-
-class EventLogReader(ABC):
-    """Abstraction over a platform event log source.
-
-    Implementations are injected into :class:`WindowsEventLogCollector` so the
-    collector's filtering, deduplication, and checkpoint logic is testable
-    offline against a controlled fake reader.
-    """
-
-    @abstractmethod
-    def read(
-        self,
-        channels: tuple[str, ...],
-        since: datetime,
-        limit: int,
-    ) -> EventLogReadResult:
-        """Read recent records from the given channels."""
 
 
 class Win32EventLogReader(EventLogReader):
@@ -244,7 +181,8 @@ class Win32EventLogReader(EventLogReader):
             provider=provider,
             event_id=event_id,
             level=level,
-            message=_truncate(message),
+            message=truncate_message(message),
+            source=SOURCE_WINDOWS_LOCAL,
         )
 
 
@@ -303,11 +241,7 @@ class WevtutilEventLogReader(EventLogReader):
 
 def _truncate(text: str, limit: int = 2000) -> str:
     """Bound the size of a collected event message."""
-    if not text:
-        return ""
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "…"
+    return truncate_message(text, limit)
 
 
 def _parse_wevtutil_xml(xml_text: str, channel: str) -> list[SystemEventRecord]:
@@ -380,12 +314,13 @@ def _parse_wevtutil_xml(xml_text: str, channel: str) -> list[SystemEventRecord]:
                 event_id=event_id,
                 level=_SEVERITY_MAP.get(level_value) if level_value else None,
                 message=_truncate(message),
+                source=SOURCE_WINDOWS_LOCAL,
             )
         )
     return records
 
 
-class WindowsEventLogCollector:
+class WindowsEventLogCollector(SystemEventCollector):
     """Collect a bounded, filtered, deduplicated set of Windows system events.
 
     Parameters
@@ -411,6 +346,8 @@ class WindowsEventLogCollector:
         ``wevtutil`` otherwise.
     """
 
+    default_checkpoint_name = "reson_eventlog_checkpoint.json"
+
     def __init__(
         self,
         host_id: str | None = None,
@@ -422,31 +359,20 @@ class WindowsEventLogCollector:
         checkpoint_path: str | Path | None = None,
         reader: EventLogReader | None = None,
     ) -> None:
-        from src.data.host_identity import stable_host_id
-
-        self._host_id = host_id or stable_host_id()
-        self._source = source
-        self._allowed_channels = tuple(allowed_channels)
-        self._allowed_event_ids = (
-            dict(allowed_event_ids)
-            if allowed_event_ids is not None
-            else {k: tuple(v) for k, v in DEFAULT_ALLOWED_EVENT_IDS.items()}
+        super().__init__(
+            host_id=host_id,
+            source=source,
+            allowed_channels=allowed_channels,
+            allowed_event_ids=(
+                dict(allowed_event_ids)
+                if allowed_event_ids is not None
+                else {k: tuple(v) for k, v in DEFAULT_ALLOWED_EVENT_IDS.items()}
+            ),
+            window_minutes=window_minutes,
+            max_records=max_records,
+            checkpoint_path=checkpoint_path,
+            reader=reader,
         )
-        self._window_minutes = max(1, int(window_minutes))
-        self._max_records = max(1, int(max_records))
-        self._checkpoint_path = (
-            Path(checkpoint_path)
-            if checkpoint_path is not None
-            else Path(tempfile.gettempdir()) / "reson_eventlog_checkpoint.json"
-        )
-        self._reader = reader or self._default_reader()
-        self._seen_ids: set[str] = set()
-        self._last_error: str | None = None
-        self._load_checkpoint()
-
-    # ------------------------------------------------------------------
-    # Reader selection
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _default_reader() -> EventLogReader:
@@ -456,99 +382,18 @@ class WindowsEventLogCollector:
             return Win32EventLogReader()
         return WevtutilEventLogReader()
 
-    # ------------------------------------------------------------------
-    # Collection
-    # ------------------------------------------------------------------
 
-    @property
-    def last_error(self) -> str | None:
-        """Most recent read error, if any."""
-        return self._last_error
-
-    @property
-    def available(self) -> bool:
-        """Whether the last read attempt succeeded."""
-        return self._last_error is None
-
-    def collect(self, now: datetime | None = None) -> EventLogReadResult:
-        """Collect recent, allowed, not-yet-seen system events.
-
-        Returns an :class:`EventLogReadResult` whose ``error`` is set when the
-        log could not be read, so the caller can distinguish "no events" from
-        "collection unavailable".
-        """
-        reference = now or datetime.now(timezone.utc)
-        since = reference - timedelta(minutes=self._window_minutes)
-
-        result = self._reader.read(
-            self._allowed_channels, since, self._max_records
-        )
-        if result.error:
-            self._last_error = result.error
-            return result
-
-        self._last_error = None
-        allowed = [
-            record
-            for record in result.records
-            if self._is_allowed(record) and record.record_id not in self._seen_ids
-        ]
-        # Deduplicate within this batch as well as against the checkpoint.
-        unique: dict[str, SystemEventRecord] = {}
-        for record in allowed:
-            unique.setdefault(record.record_id, record)
-
-        for record in unique.values():
-            self._seen_ids.add(record.record_id)
-
-        # Keep the in-memory set bounded.
-        if len(self._seen_ids) > self._max_records * 20:
-            self._seen_ids = set(list(self._seen_ids)[-self._max_records * 10:])
-
-        self._save_checkpoint()
-        return EventLogReadResult(
-            records=tuple(unique.values()), available=True
-        )
-
-    def _is_allowed(self, record: SystemEventRecord) -> bool:
-        """Return whether the record passes the channel/event allowlist."""
-        if record.channel not in self._allowed_channels:
-            return False
-        allowed_ids = self._allowed_event_ids.get(record.channel)
-        if allowed_ids is None or not allowed_ids:
-            return True
-        return record.event_id in allowed_ids
-
-    # ------------------------------------------------------------------
-    # Checkpoint
-    # ------------------------------------------------------------------
-
-    def _load_checkpoint(self) -> None:
-        """Load the deduplication checkpoint, ignoring a corrupt file."""
-        try:
-            raw = self._checkpoint_path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError):
-            return
-        try:
-            payload = json.loads(raw)
-        except (ValueError, TypeError):
-            return
-        seen = payload.get("seen_ids")
-        if isinstance(seen, list):
-            self._seen_ids = {str(item) for item in seen}
-
-    def _save_checkpoint(self) -> None:
-        """Persist the deduplication checkpoint."""
-        payload = {
-            "seen_ids": sorted(self._seen_ids),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        try:
-            self._checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-            self._checkpoint_path.write_text(
-                json.dumps(payload), encoding="utf-8"
-            )
-        except OSError:
-            # A checkpoint is an optimization; failing to write it must not
-            # break collection.
-            pass
+__all__ = [
+    "DEFAULT_ALLOWED_CHANNELS",
+    "DEFAULT_ALLOWED_EVENT_IDS",
+    "LEVEL_CRITICAL",
+    "LEVEL_ERROR",
+    "LEVEL_INFORMATION",
+    "LEVEL_WARNING",
+    "EventLogReader",
+    "EventLogReadResult",
+    "SystemEventRecord",
+    "Win32EventLogReader",
+    "WevtutilEventLogReader",
+    "WindowsEventLogCollector",
+]

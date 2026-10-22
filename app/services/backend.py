@@ -23,8 +23,17 @@ from src.common.timeutil import (
     zone_offset_label,
 )
 from src.data.collector import CollectionResult, collection_to_metrics
-from src.data.dataset import HistoricalDatasetBuilder
-from src.data.dataset_service import HistoricalDatasetService
+from src.data.demonstration import (
+    DEMO_HISTORY_BATCHES,
+    DEMO_START,
+    FULL_SCENARIOS,
+    QUICK_SCENARIOS,
+    TIMELINE_PROFILES,
+    Demonstration,
+    resolve_scenarios,
+    run_demonstration,
+    timeline_label,
+)
 from src.data.ingestion import TelemetryIngestionService
 from src.data.monitoring import (
     CollectorStatus,
@@ -40,25 +49,16 @@ from src.data.monitoring import (
     resolve_mode,
     source_inventory,
 )
-from src.data.schemas import Deployment, Event, Incident, Log, Metric
+from src.data.schemas import Event, Incident
 from src.data.storage import Storage
 from src.incidents.lifecycle import IncidentLifecycle
-from src.incidents.models import IncidentIntelligenceResult
-from src.incidents.reconstruction import HistoricalSignalContext
 from src.incidents.service import IncidentIntelligenceService
 from src.intelligence.baseline import BaselineReadiness, assess_series_readiness
 from src.intelligence.historical_comparison import (
     HistoricalComparisonResult,
     compare_periods,
 )
-from src.intelligence.models import (
-    BaselineKey,
-    BehaviorAnalysis,
-    ChangePoint,
-    HistoricalBaseline,
-    MetricDeviation,
-)
-from src.intelligence.service import BehaviorIntelligenceService
+from src.intelligence.models import BaselineKey
 from src.preprocessing.normalizer import group_metrics
 from src.orchestrator import RESONApplication, create_application
 
@@ -73,6 +73,9 @@ DEMO_HISTORY_BATCHES = 3
 __all__ = [
     "DEMO_START",
     "DEMO_HISTORY_BATCHES",
+    "FULL_SCENARIOS",
+    "QUICK_SCENARIOS",
+    "TIMELINE_PROFILES",
     "Demonstration",
     "DashboardContext",
     "MonitoringMode",
@@ -91,9 +94,11 @@ __all__ = [
     "metric_series",
     "process_inventory",
     "resolve_mode",
+    "resolve_scenarios",
     "derive_status",
     "run_demonstration",
     "split_records",
+    "timeline_label",
     "incident_label",
     "ordered_incidents",
     "severity_explanation",
@@ -113,22 +118,6 @@ __all__ = [
     "chart_axis_title",
     "resolve_timezone",
 ]
-
-
-@dataclass
-class Demonstration:
-    """Results of one user-triggered local demonstration analysis."""
-
-    simulated: bool = True
-    batches: int = 0
-    records: int = 0
-    scenarios: list[str] = field(default_factory=list)
-    baselines: dict[BaselineKey, HistoricalBaseline] = field(default_factory=dict)
-    analysis: BehaviorAnalysis | None = None
-    deviations: list[MetricDeviation] = field(default_factory=list)
-    change_points: list[ChangePoint] = field(default_factory=list)
-    incident_result: IncidentIntelligenceResult | None = None
-    signal_context: HistoricalSignalContext | None = None
 
 
 def build_application(backend: str) -> RESONApplication:
@@ -174,98 +163,9 @@ def storage_counts(
 
 def split_records(records: list) -> tuple[list, list, list, list]:
     """Split telemetry records into metrics, logs, events, deployments."""
-    metrics = [r for r in records if isinstance(r, Metric)]
-    logs = [r for r in records if isinstance(r, Log)]
-    events = [r for r in records if isinstance(r, Event)]
-    deployments = [r for r in records if isinstance(r, Deployment)]
-    return metrics, logs, events, deployments
+    from src.data.demonstration import split_records as _split_records
 
-
-def run_demonstration(
-    application: RESONApplication,
-    scenarios: tuple[str, ...] | list[str] | None = None,
-) -> Demonstration:
-    """Run the full deterministic pipeline on simulated telemetry.
-
-    Builds the historical dataset, ingests every record through the real
-    ingestion service, derives baselines from the leading normal batches,
-    analyzes the remaining window with the real intelligence services, and
-    persists incidents plus evidence through the selected backend.
-
-    ``scenarios`` selects the simulation timeline. ``None`` uses the full
-    default timeline; a shorter list produces a smaller, faster analysis
-    that is still a complete run of the same pipeline.
-    """
-    storage = application.storage
-    dataset = HistoricalDatasetBuilder().build(
-        start_time=DEMO_START, scenarios=scenarios
-    )
-
-    dataset_service = HistoricalDatasetService(
-        builder=HistoricalDatasetBuilder(),
-        ingestion=TelemetryIngestionService(storage),
-    )
-    # Persist the very dataset that is analyzed below. The service tags every
-    # record with source='simulation' and returns those same objects, so the
-    # incidents and evidence derived from them carry the same provenance as
-    # the stored telemetry. Analyzing a separate, untagged copy would leave
-    # every incident without an attributable source.
-    dataset_service.build_and_persist(start_time=DEMO_START, dataset=dataset)
-
-    history_records: list = []
-    current_records: list = []
-    for index, batch in enumerate(dataset.batches):
-        if index < DEMO_HISTORY_BATCHES:
-            history_records.extend(batch.records())
-        else:
-            current_records.extend(batch.records())
-
-    history_metrics, _, _, _ = split_records(history_records)
-    metrics, logs, events, deployments = split_records(current_records)
-
-    behavior = BehaviorIntelligenceService()
-    baselines = behavior.build_baselines(history_metrics)
-    analysis = behavior.analyze(
-        baselines, metrics, logs=logs, events=events, deployments=deployments
-    )
-
-    intelligence = IncidentIntelligenceService(storage=storage)
-    deviations, change_points = intelligence.derive_evidence(
-        metrics,
-        baselines,
-        window_start=analysis.analysis_window_start,
-        window_end=analysis.analysis_window_end,
-    )
-    incident_result = intelligence.analyze(
-        analysis=analysis,
-        deviations=deviations,
-        change_points=change_points,
-        logs=logs,
-        events=events,
-        deployments=deployments,
-        window_start=analysis.analysis_window_start,
-        window_end=analysis.analysis_window_end,
-    )
-    intelligence.persist(incident_result)
-
-    return Demonstration(
-        simulated=True,
-        batches=dataset.batch_count,
-        records=dataset.record_count,
-        scenarios=list(dataset.scenarios),
-        baselines=baselines,
-        analysis=analysis,
-        deviations=deviations,
-        change_points=change_points,
-        incident_result=incident_result,
-        signal_context=HistoricalSignalContext(
-            metrics=metrics,
-            logs=logs,
-            events=events,
-            deployments=deployments,
-            baselines=baselines,
-        ),
-    )
+    return _split_records(records)
 
 
 def recent_events(

@@ -283,6 +283,97 @@ def test_event_ids_map_onto_reson_event_types():
 
 
 # ---------------------------------------------------------------------------
+# System-event collection
+# ---------------------------------------------------------------------------
+
+
+class StubEventCollector:
+    """Event collector returning one fixed record."""
+
+    def __init__(self, records=(), error=None):
+        self._records = list(records)
+        self._error = error
+        self.calls = 0
+
+    def collect(self, now=None):
+        from src.data.system_event_log import EventLogReadResult
+
+        self.calls += 1
+        if self._error is not None:
+            return EventLogReadResult(
+                records=(), error=self._error, available=False
+            )
+        return EventLogReadResult(
+            records=tuple(self._records), available=True
+        )
+
+
+def _event_record():
+    from src.data.system_event_log import SystemEventRecord
+
+    return SystemEventRecord(
+        record_id="journal:cursor-1",
+        # A current timestamp: the agent applies its retention window, and an
+        # old record would be pruned before the assertion could see it.
+        timestamp=datetime.now(timezone.utc),
+        channel="kernel",
+        provider="kernel",
+        event_id=3,
+        level="ERROR",
+        message="the system reported a failure",
+    )
+
+
+def test_system_events_are_ingested_with_their_provenance():
+    storage = InMemoryStorage()
+    agent = CollectorAgent(
+        config=AgentConfig(storage_backend="memory", collect_events=True),
+        storage=storage,
+        collector=StubCollector(),
+        event_collector=StubEventCollector([_event_record()]),
+    )
+    agent.run_once()
+
+    events = storage.get_events()
+    assert len(events) == 1
+    assert events[0].source == SOURCE_LINUX_LOCAL
+    assert events[0].host_id == "stub-host"
+    assert events[0].metadata["record_id"] == "journal:cursor-1"
+
+
+def test_a_failed_event_read_does_not_stop_metric_collection():
+    storage = InMemoryStorage()
+    agent = CollectorAgent(
+        config=AgentConfig(storage_backend="memory", collect_events=True),
+        storage=storage,
+        collector=StubCollector(),
+        event_collector=StubEventCollector(error="access denied"),
+    )
+    agent.run_once()
+
+    assert storage.get_metrics(host_id="stub-host")
+    assert storage.get_events() == []
+    health = agent.health()
+    assert health.error_count == 1
+    assert health.last_error == "access denied"
+
+
+def test_the_default_event_collector_follows_the_platform():
+    """The agent picks the platform's own event reader."""
+    from src.data.linux_journal import LinuxJournalCollector
+
+    agent = CollectorAgent(
+        config=AgentConfig(
+            storage_backend="memory", collect_events=True, platform="linux"
+        ),
+        storage=InMemoryStorage(),
+        collector=StubCollector(),
+    )
+    agent.run_once()
+    assert isinstance(agent._event_collector, LinuxJournalCollector)
+
+
+# ---------------------------------------------------------------------------
 # Command line
 # ---------------------------------------------------------------------------
 
@@ -306,6 +397,70 @@ def test_cli_once_runs_a_single_cycle(capsys, tmp_path, monkeypatch):
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "ingested" in output
+
+
+# ---------------------------------------------------------------------------
+# Demonstration command line
+# ---------------------------------------------------------------------------
+
+
+def test_cli_demonstration_runs_the_full_timeline(capsys, tmp_path, monkeypatch):
+    from src.data.agent import main
+
+    monkeypatch.setenv("RESON_SQLITE_PATH", str(tmp_path / "demo.db"))
+    exit_code = main(["--backend", "sqlite", "--demonstrate"])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Demonstration complete" in output
+    assert "timeline=full" in output
+    assert "incident(s)" in output
+
+
+def test_cli_quick_demonstration_is_faster_and_smaller(
+    capsys, tmp_path, monkeypatch
+):
+    from src.data.agent import main
+
+    monkeypatch.setenv("RESON_SQLITE_PATH", str(tmp_path / "demo.db"))
+    exit_code = main(["--backend", "sqlite", "--demonstrate", "--quick"])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "timeline=quick" in output
+    # The quick timeline still detects an incident.
+    assert "1 incident(s)" in output
+
+
+def test_cli_demonstration_accepts_an_explicit_scenario_list(
+    capsys, tmp_path, monkeypatch
+):
+    from src.data.agent import main
+
+    monkeypatch.setenv("RESON_SQLITE_PATH", str(tmp_path / "demo.db"))
+    exit_code = main(
+        [
+            "--backend",
+            "sqlite",
+            "--demonstrate",
+            "--scenarios",
+            "normal,normal,normal,error_spike,normal",
+        ]
+    )
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Demonstration complete" in output
+
+
+def test_cli_demonstration_rejects_an_empty_scenario_list(
+    capsys, tmp_path, monkeypatch
+):
+    from src.data.agent import main
+
+    monkeypatch.setenv("RESON_SQLITE_PATH", str(tmp_path / "demo.db"))
+    exit_code = main(
+        ["--backend", "sqlite", "--demonstrate", "--scenarios", " , "]
+    )
+    assert exit_code == 2
+    assert "Invalid demonstration request" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

@@ -82,3 +82,66 @@ def create_collector(
     return MacOSTelemetryCollector(
         host_id=host_id, source=source or SOURCE_MACOS_LOCAL
     )
+
+
+def create_event_collector(
+    platform_name: str | None = None,
+    host_id: str | None = None,
+    source: str | None = None,
+    window_minutes: int = 60,
+    max_records: int = 200,
+    checkpoint_path: str | None = None,
+):
+    """Create the system-event collector for the given (or current) platform.
+
+    Each platform exposes its own event log — the Windows Event Log, the
+    systemd journal, the macOS unified log — and each has its own reader.
+    All of them apply the same guarantees (allowlist, bounded window, record
+    limit, stable identifiers, checkpoint de-duplication, honest errors).
+
+    The platform-specific module is imported only after the platform has been
+    resolved, so a missing or broken platform module cannot affect the other
+    operating systems.
+    """
+    key = normalize_platform(platform_name)
+
+    if key == "windows":
+        from src.data.windows_event_log import (
+            SOURCE_WINDOWS_LOCAL,
+            WindowsEventLogCollector,
+        )
+
+        return WindowsEventLogCollector(
+            host_id=host_id,
+            source=source or SOURCE_WINDOWS_LOCAL,
+            window_minutes=window_minutes,
+            max_records=max_records,
+            checkpoint_path=checkpoint_path,
+        )
+
+    if key == "linux":
+        from src.data.linux_journal import (
+            SOURCE_LINUX_LOCAL,
+            LinuxJournalCollector,
+        )
+
+        return LinuxJournalCollector(
+            host_id=host_id,
+            source=source or SOURCE_LINUX_LOCAL,
+            window_minutes=window_minutes,
+            max_records=max_records,
+            checkpoint_path=checkpoint_path,
+        )
+
+    from src.data.macos_unified_log import (
+        SOURCE_MACOS_LOCAL,
+        MacOSUnifiedLogCollector,
+    )
+
+    return MacOSUnifiedLogCollector(
+        host_id=host_id,
+        source=source or SOURCE_MACOS_LOCAL,
+        window_minutes=window_minutes,
+        max_records=max_records,
+        checkpoint_path=checkpoint_path,
+    )

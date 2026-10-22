@@ -325,6 +325,22 @@ def _sidebar() -> str:
 
     st.sidebar.markdown("---")
     if app is not None:
+        timeline = st.sidebar.radio(
+            "Demonstration timeline",
+            ("full", "quick"),
+            format_func=lambda value: (
+                "Full timeline (15 batches)"
+                if value == "full"
+                else "Quick timeline (5 batches)"
+            ),
+            help=(
+                "The full timeline analyses the complete 15-batch simulated "
+                "history. The quick timeline runs the identical pipeline over "
+                "a much shorter window and finishes in a fraction of the "
+                "time. Both produce simulated telemetry that is clearly "
+                "labeled."
+            ),
+        )
         if st.sidebar.button(
             "Run Local Demonstration Analysis",
             type="primary",
@@ -332,8 +348,11 @@ def _sidebar() -> str:
         ):
             st.session_state["reson_demo_error"] = None
             try:
+                scenarios = svc.resolve_scenarios(profile=timeline)
                 with st.spinner("Running ingestion and intelligence pipeline…"):
-                    st.session_state["reson_demo"] = svc.run_demonstration(app)
+                    st.session_state["reson_demo"] = svc.run_demonstration(
+                        app, scenarios=scenarios
+                    )
                 # Demonstration data is stored under the 'simulation' source.
                 # Switch the dashboard into demonstration mode so the results
                 # are shown in their own clearly labeled view rather than
@@ -351,8 +370,13 @@ def _sidebar() -> str:
             st.sidebar.error(demo_error)
         elif st.session_state.get("reson_demo") is not None:
             demo = st.session_state["reson_demo"]
+            label = (
+                "Quick simulated analysis ready"
+                if getattr(demo, "timeline", "full") == "quick"
+                else "Simulated analysis ready"
+            )
             st.sidebar.success(
-                f"Simulated analysis ready: {demo.records} records, "
+                f"{label}: {demo.records} records, "
                 f"{len(demo.incident_result.researches)} incident(s)."
             )
 

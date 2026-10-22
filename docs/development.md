@@ -234,8 +234,12 @@ intelligence algorithm is reimplemented in Streamlit.
   `get_incidents`/`get_evidence` in `historical_candidates`, without time
   bounds), so the mismatch is latent. A future caller bridging the two must
   convert bounds explicitly. Changing either side needs a product decision.
-- **No bulk incident/evidence persistence.** Telemetry has bulk writes;
-  incident/evidence persistence is single-row. Fine at current scale.
+- **Incidents are still written one row at a time.** Telemetry *and*
+  evidence have bulk writes (`save_metrics`, `save_logs`, `save_events`,
+  `save_deployments`, `save_evidence_batch`), but `save_incident` has no bulk
+  counterpart. One analysis produces a handful of incidents, so this is not a
+  bottleneck; a workload that produces thousands of incidents per run would
+  need one.
 - **Session-only analytical detail.** Severity explanations, per-signal
   detail, per-pair correlation factors, and fingerprint/shift contributions
   are produced during an analysis run and are not persisted by design.

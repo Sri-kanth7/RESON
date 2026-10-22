@@ -181,20 +181,29 @@ print('mem', psutil.virtual_memory().percent)
 "
 ```
 
-### Windows: no events are collected
+### No system events are collected
 
-Event collection is opt-in. Enable it with `--events`.
+Event collection is opt-in. Enable it with `--events`. It reads the
+platform's own event log: the **Windows Event Log**, the **systemd journal**
+on Linux, and the **macOS unified log**.
 
 If it still collects nothing:
 
-* Without `pywin32`, RESON falls back to `wevtutil`. Check it works:
-  `wevtutil qe System /c:5 /f:text`.
-* The channel may be unreadable at the current privilege level. The error is
-  reported explicitly; RESON never pretends "no events" when it could not
-  read the log.
+* **Windows** — without `pywin32`, RESON falls back to `wevtutil`. Check it
+  works: `wevtutil qe System /c:5 /f:text`.
+* **Linux** — check the journal itself: `journalctl -p err -n 5`. A machine
+  without systemd has no journal at all; RESON then reports the collection
+  as unavailable, not as "no events".
+* **macOS** — check the unified log: `log show --last 1h --predicate
+  'process == "kernel"'`. Some subsystems need elevated privileges.
+* The channel/unit/process may be unreadable at the current privilege level.
+  The error is reported explicitly; RESON never pretends "no events" when it
+  could not read the log.
 * The allowlist is narrow by design. Widen
-  `DEFAULT_ALLOWED_EVENT_IDS` in `src/data/windows_event_log.py` if you
-  need more, and review the privacy implications first.
+  `DEFAULT_ALLOWED_EVENT_IDS` in `src/data/windows_event_log.py`,
+  `JOURNAL_MATCHES` in `src/data/linux_journal.py` or
+  `DEFAULT_ALLOWED_CHANNELS` in `src/data/macos_unified_log.py` if you need
+  more, and review the privacy implications first.
 
 ### The agent's database grows too large
 
@@ -217,6 +226,16 @@ counts.
 The demonstration analysis writes records under the `simulation` source and
 switches the dashboard into **Demonstration** mode. If you then switch back
 to **Local monitoring**, the simulation data is correctly hidden.
+
+The sidebar offers two timelines next to the button: **Full timeline (15
+batches)** and **Quick timeline (5 batches)**. The quick run produces the
+same kind of result — an incident with its evidence chain — in a fraction of
+the time, and the sidebar labels it *"Quick simulated analysis ready"*. The
+same pipeline is available from the command line:
+
+```bash
+python -m src.data.agent --backend sqlite --demonstrate --quick
+```
 
 ### Everything is labelled "SIMULATED"
 
@@ -251,7 +270,7 @@ backends:
 
 ```bash
 python -m pytest -q --ignore=tests/test_storage.py --ignore=tests/test_supabase_connection.py
-# 512 passed, 5 skipped
+# 639 passed, 5 skipped
 ```
 
 To run the integration tests, create a `.env` with:

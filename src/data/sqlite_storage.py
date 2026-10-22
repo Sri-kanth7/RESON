@@ -1192,6 +1192,14 @@ class SQLiteStorage(Storage):
     # ------------------------------------------------------------------
 
     def save_incident(self, incident: Incident) -> Incident:
+        """Persist an incident and return the stored incident.
+
+        The write is an upsert on the incident id: re-saving an incident (for
+        example when it moves from ``open`` to ``investigating``) updates the
+        stored row instead of failing on the primary key. This matches the
+        in-memory backend, which is keyed by id.
+        """
+
         def func(conn: sqlite3.Connection) -> Incident:
             conn.execute(
                 """
@@ -1199,6 +1207,16 @@ class SQLiteStorage(Storage):
                     (id, title, start_time, end_time, severity, status,
                      scenario, affected_services, source, host_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    title = excluded.title,
+                    start_time = excluded.start_time,
+                    end_time = excluded.end_time,
+                    severity = excluded.severity,
+                    status = excluded.status,
+                    scenario = excluded.scenario,
+                    affected_services = excluded.affected_services,
+                    source = excluded.source,
+                    host_id = excluded.host_id
                 """,
                 (
                     str(incident.id),
@@ -1282,6 +1300,13 @@ class SQLiteStorage(Storage):
     # ------------------------------------------------------------------
 
     def save_evidence(self, evidence: Evidence) -> Evidence:
+        """Persist an evidence relationship and return the stored evidence.
+
+        The write is an upsert on the evidence id, so re-saving the same
+        evidence link updates the stored row instead of failing on the primary
+        key. This matches the in-memory backend, which is keyed by id.
+        """
+
         def func(conn: sqlite3.Connection) -> Evidence:
             conn.execute(
                 """
@@ -1290,6 +1315,17 @@ class SQLiteStorage(Storage):
                      relationship_type, timestamp, strength, explanation,
                      source, host_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    source_id = excluded.source_id,
+                    source_type = excluded.source_type,
+                    target_id = excluded.target_id,
+                    target_type = excluded.target_type,
+                    relationship_type = excluded.relationship_type,
+                    timestamp = excluded.timestamp,
+                    strength = excluded.strength,
+                    explanation = excluded.explanation,
+                    source = excluded.source,
+                    host_id = excluded.host_id
                 """,
                 (
                     str(evidence.id),
@@ -1306,6 +1342,58 @@ class SQLiteStorage(Storage):
                 ),
             )
             return evidence
+
+        return self._write_op(func)
+
+    def save_evidence_batch(self, evidence: list[Evidence]) -> list[Evidence]:
+        """Persist many evidence relationships in one transaction.
+
+        The correlation engine can materialize tens of thousands of evidence
+        links in a single analysis. Writing them one row per transaction
+        dominated the runtime of a local demonstration; one batched write
+        performs the whole set in a single transaction.
+        """
+        if not evidence:
+            return []
+
+        def func(conn: sqlite3.Connection) -> list[Evidence]:
+            conn.executemany(
+                """
+                INSERT INTO evidence
+                    (id, source_id, source_type, target_id, target_type,
+                     relationship_type, timestamp, strength, explanation,
+                     source, host_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    source_id = excluded.source_id,
+                    source_type = excluded.source_type,
+                    target_id = excluded.target_id,
+                    target_type = excluded.target_type,
+                    relationship_type = excluded.relationship_type,
+                    timestamp = excluded.timestamp,
+                    strength = excluded.strength,
+                    explanation = excluded.explanation,
+                    source = excluded.source,
+                    host_id = excluded.host_id
+                """,
+                [
+                    (
+                        str(item.id),
+                        str(item.source_id),
+                        str(item.source_type),
+                        str(item.target_id),
+                        str(item.target_type),
+                        str(item.relationship_type),
+                        _iso(item.timestamp),
+                        item.strength,
+                        item.explanation,
+                        item.source,
+                        item.host_id,
+                    )
+                    for item in evidence
+                ],
+            )
+            return list(evidence)
 
         return self._write_op(func)
 

@@ -1,8 +1,8 @@
 # RESON Deployment Readiness Report
 
 **Repository:** `https://github.com/Sri-kanth7/RESON.git`
-**Branch:** `main` | **HEAD:** `97361fa feat: complete RESON observability platform with telemetry provenance` (pushed to `origin/main`)
-**Assessment date:** 2026-10-21
+**Branch:** `main` | **HEAD:** `97361fa feat: complete RESON observability platform with telemetry provenance` (pushed to `origin/main`), plus the uncommitted work described in §10
+**Assessment date:** 2026-10-21 (revised 2026-10-22 — see §10)
 
 ---
 
@@ -15,6 +15,8 @@
 | Linux platform validation | **Validated** | Real collection run on this environment |
 | Windows platform validation | **Pending** | Implemented and unit-tested; no Windows machine was available |
 | macOS platform validation | **Pending** | Implemented and unit-tested; no macOS machine was available |
+| System-event collection | **Implemented** | Windows Event Log, systemd journal and macOS unified log, with the same allowlist/bounds/checkpoint guarantees; only the Linux `journalctl` binary has been invoked on real hardware |
+| Local demonstration responsiveness | **Ready** | The full default timeline completes in ~1 s (was 37–102 s); a quick timeline completes in ~0.06 s |
 | Public hosted deployment (demonstration) | **Deployment-ready** | Artifacts present; the owner must perform the deployment |
 | Public hosted deployment (real monitoring) | **Not available** | Requires the authenticated remote-ingestion path, which is not implemented |
 | Production security posture | **Not production-ready** | See §7 |
@@ -29,6 +31,10 @@ exact steps are in `docs/deployment.md`. No URL is claimed here.
 > returns and filters provenance instead of discarding it. The test counts
 > below were re-measured. See §7 for the remaining gaps.
 
+> **Updated 2026-10-22.** The performance, CI, platform-event and
+> demonstration work described in §10 landed on top of the recovery state.
+> The test counts in this document were re-measured after that work.
+
 ---
 
 ## 2. What was verified, and how
@@ -36,18 +42,21 @@ exact steps are in `docs/deployment.md`. No URL is claimed here.
 | Check | Command | Result |
 |---|---|---|
 | Dependency install and consistency | `pip install -r requirements.txt`, `pip check` | Passes on Python 3.14.2 |
-| Offline test suite | `pytest -q --ignore=tests/test_storage.py --ignore=tests/test_supabase_connection.py` | **583 passed, 5 skipped, 0 failed** |
-| Full test suite | `pytest -q` | **583 passed, 19 skipped, 0 failed** — the 19 skips are live Supabase integration tests, skipped with an explicit reason when the credentials are absent (see §6) |
+| Offline test suite | `pytest -q --ignore=tests/test_storage.py --ignore=tests/test_supabase_connection.py` | **639 passed, 5 skipped, 0 failed** |
+| Full test suite | `pytest -q` | **639 passed, 19 skipped, 0 failed** — the 19 skips are live Supabase integration tests, skipped with an explicit reason when the credentials are absent (see §6) |
+| Continuous integration | `.github/workflows/ci.yml` | Runs the offline suite on Python 3.11 and 3.14 with no credentials; the 19 live tests are verified to skip cleanly |
 | App starts and serves | `streamlit run app/streamlit_app.py`, then `GET /_stcore/health` | **HTTP 200 / `ok`**; `GET /` → **HTTP 200** (re-verified 2026-10-21) |
 | Every page renders | `AppTest` over all 8 pages × 4 monitoring modes | **No exceptions** |
 | Every page renders in a non-UTC timezone | `AppTest` over all 8 pages with `America/New_York` selected | **No exceptions** |
 | Real telemetry collection | `python -m src.data.agent --backend sqlite --once` | **97 real metric records ingested**, correct source and host id |
+| Real system-event collection | `python -m src.data.agent --backend sqlite --once --events` | Runs on Linux; this container has no journal entries, so 0 events were collected and **no error was reported** |
 | Data survives a restart | SQLite file re-opened in a new process | Passes |
 | Migrations are non-destructive | Legacy v1 database migrated in place to v4 | Passes, idempotent, data preserved |
 | Concurrent access | 8 writer threads + 4 reader threads against one file | Passes, no lost records |
 | Cross-platform imports | Import every platform collector module | Passes (each is imported lazily) |
 | Incident provenance | Full demonstration pipeline | The incident and all 18,915 evidence links carry `source="simulation"`; a `linux_local` filter returns none |
 | Storage provenance | All three backends | SQLite, in-memory and Supabase all store, return and filter `source`/`host_id` |
+| Correlation determinism | `tests/test_correlation_equivalence.py` | A recorded digest of every decision the engine makes (factors, strengths, accept/reject, explanations, identifiers) is unchanged by the performance work |
 | Secret scan | Repository-wide scan for credential patterns | **No secrets found**; no `.env` present |
 | Test isolation | Full suite run | Tests write only to `tmp_path`; the user data directory is left clean |
 
@@ -65,6 +74,8 @@ Python 3.14.2, SQLite 3.45.1, 22,000 metric rows):
 | Bounded time-window query | 53 ms |
 | Retention pruning | 27,000 rows in 0.195 s |
 | Telemetry volume with the default sampling policy | 15.8 records/cycle → 272,160 records/day at a 5 s interval (down from ~2.2M/day unfiltered) |
+| **Default demonstration (15 batches, 194 signals, 18,721 candidate pairs)** | **0.83 s in memory / 1.03 s on SQLite** (was 37–102 s) |
+| Quick demonstration (5 batches) | 0.06 s |
 
 These figures describe **this** machine and dataset size. Re-run the script
 on the target hardware before quoting them as expected performance.
@@ -147,7 +158,7 @@ secrets **and** implement the ingestion path of §4.
 
 ## 6. Test results and failure classification
 
-Full suite: **583 passed, 19 skipped, 0 failed**.
+Full suite: **639 passed, 19 skipped, 0 failed**.
 
 The 19 skips are live Supabase integration tests. They carry the
 `requires_supabase` marker and are skipped with an explicit reason when the
@@ -241,3 +252,25 @@ defect.
 | "RESON is deployed at a public URL" | **No** — not deployed; the owner performs this step |
 | "A public RESON URL monitors your computer" | **No** — and RESON states this explicitly rather than implying otherwise |
 | "RESON is production-secure for multi-tenant hosting" | **No** — see §7 |
+
+---
+
+## 10. Changes since the previous assessment (2026-10-22)
+
+This section records the work of the 2026-10-22 session, which closed the
+technical items of `RESON_NEXT_TASKS.md` §2. The full evidence is in
+`RESON_SESSION_2026-10-22_REPORT.md`.
+
+| Area | Change | Evidence |
+|---|---|---|
+| Performance | The default demonstration went from **37–102 s to ~1 s**. The cause was the evidence chain: 18,721 correlation links were written one row per transaction. The engine now prepares per-signal values once instead of recomputing them per pair, and the chain is written in one batched transaction. | `scripts/benchmark.py` §7; `tests/test_demonstration_performance.py`; `tests/test_correlation_equivalence.py` |
+| Correctness of that change | Every decision the correlation engine makes — factors, strengths, accept/reject, explanations and content-derived identifiers — is pinned by a recorded digest and is **bit-identical** to the pre-change engine. | `tests/test_correlation_equivalence.py` (4 tests) |
+| Storage | `Storage.save_evidence_batch()` was added to the abstraction; incidents and evidence are now upserts on SQLite and Supabase, matching the in-memory backend (re-saving an incident no longer fails on the primary key). | `src/data/storage.py`, `src/data/sqlite_storage.py`, `src/data/supabase_storage.py` |
+| Continuous integration | `.github/workflows/ci.yml` runs the offline suite on Python 3.11 and 3.14 with no credentials, and verifies that the 19 live integration tests skip cleanly. | `.github/workflows/ci.yml` |
+| System events | The systemd journal (Linux) and the unified log (macOS) are now read, with the same allowlist, bounds, stable identifiers, checkpoint de-duplication and honest error reporting as the Windows Event Log collector. | `src/data/system_event_log.py`, `src/data/linux_journal.py`, `src/data/macos_unified_log.py`, `tests/test_platform_event_logs.py` (29 tests) |
+| Demonstration | The dashboard offers a **quick** and a **full** timeline, and the same pipeline is available from the command line (`--demonstrate`, `--quick`, `--scenarios`). | `src/data/demonstration.py`, `app/streamlit_app.py`, `src/data/agent.py` |
+| Documentation | The `Not implemented` / `Deferred` markers were audited; every remaining one is still true (remote ingestion and dashboard authentication). | `docs/`, `README.md` |
+
+**Still not done, and still honestly reported as such:** remote ingestion,
+dashboard authentication and tenant isolation, Windows/macOS platform
+validation, and the live Supabase run against a real project.

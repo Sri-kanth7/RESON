@@ -141,6 +141,49 @@ def test_demonstration_button_produces_registry(no_credentials):
     )
 
 
+def test_the_demonstration_timeline_offers_quick_and_full(no_credentials):
+    """The sidebar offers both a fast and a complete demonstration."""
+    at = run_app()
+    at.selectbox[0].set_value("memory").run()
+    assert not at.exception, at.exception
+
+    timeline_radios = [
+        radio
+        for radio in at.radio
+        if "Demonstration timeline" in str(radio.label)
+    ]
+    assert timeline_radios, "expected a demonstration timeline control"
+    options = {str(option) for option in timeline_radios[0].options}
+    assert any("Quick timeline" in option for option in options), options
+    assert any("Full timeline" in option for option in options), options
+
+
+def test_the_quick_demonstration_produces_incidents_and_is_labelled(no_credentials):
+    """The quick timeline is a complete run, and it says which one it was."""
+    at = run_app()
+    at.selectbox[0].set_value("memory").run()
+
+    timeline_radios = [
+        radio
+        for radio in at.radio
+        if "Demonstration timeline" in str(radio.label)
+    ]
+    timeline_radios[0].set_value("quick").run()
+    assert not at.exception, at.exception
+
+    demo_buttons = [b for b in at.button if "Demonstration" in str(b.label)]
+    demo_buttons[0].click().run()
+    assert not at.exception, at.exception
+
+    texts = [str(m.value) for m in at.markdown] + [
+        str(s.value) for s in at.success
+    ]
+    assert any("Quick simulated analysis ready" in t for t in texts), texts
+    assert any(
+        "Correlated Incident Registry" in str(m.value) for m in at.markdown
+    )
+
+
 def test_unreachable_backend_shows_guidance(no_credentials, monkeypatch):
     from unittest import mock
 

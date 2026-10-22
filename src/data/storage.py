@@ -77,6 +77,28 @@ class Storage(ABC):
         """Persist an evidence relationship and return the stored evidence."""
         raise NotImplementedError
 
+    def save_evidence_batch(self, evidence: list[Evidence]) -> list[Evidence]:
+        """Persist many evidence relationships in one call.
+
+        The default implementation writes each record through
+        :meth:`save_evidence`, so every backend behaves correctly without
+        change. Backends that can write many rows in a single request or
+        transaction override it.
+
+        The batch exists because a single analysis run can produce tens of
+        thousands of evidence links (the correlation engine materializes one
+        link per accepted signal pair). Writing them one at a time turns a
+        local demonstration into tens of seconds of per-row transactions; one
+        batched write turns it into a single transaction.
+
+        Semantics match :meth:`save_evidence`: a record with an id that is
+        already stored replaces the stored record rather than failing, and an
+        empty list is a no-op that returns an empty list.
+        """
+        if not evidence:
+            return []
+        return [self.save_evidence(item) for item in evidence]
+
     @abstractmethod
     def get_evidence(
         self,

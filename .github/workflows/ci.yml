@@ -1,0 +1,68 @@
+name: CI
+
+# The offline suite is what CI runs: it is self-contained, needs no
+# credentials and no network, and covers every code path that can be
+# exercised without a live Supabase project.
+#
+# The live Supabase integration tests (19 of them) are excluded from the
+# run below and are verified separately to *skip cleanly* when no
+# credentials are configured. Their assertions are unchanged: they run in
+# full against a real project when SUPABASE_URL and SUPABASE_SECRET_KEY are
+# available.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-suite:
+    name: Offline suite · Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The Python versions docs/cross_platform.md states support for.
+        python-version: ["3.11", "3.14"]
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Byte-compile every module
+        run: python -m compileall -q src app scripts
+
+      - name: Run the offline test suite
+        env:
+          # No Supabase credentials in CI: the live integration tests must
+          # skip, never fail, and never silently run against a real project.
+          SUPABASE_URL: ""
+          SUPABASE_SECRET_KEY: ""
+        run: >
+          python -m pytest -q
+          --ignore=tests/test_storage.py
+          --ignore=tests/test_supabase_connection.py
+
+      - name: Verify the live integration tests skip cleanly
+        env:
+          SUPABASE_URL: ""
+          SUPABASE_SECRET_KEY: ""
+        run: >
+          python -m pytest -q -rs
+          tests/test_storage.py
+          tests/test_supabase_connection.py

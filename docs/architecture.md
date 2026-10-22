@@ -79,6 +79,23 @@ carried from the collector all the way to the rendered card.
 * Unavailable data is reported as `None` / an empty tuple together with
   explicit capability metadata. Nothing is fabricated.
 
+### 3.1a System-event collection (`src/data/system_event_log.py`, `src/data/*_event_log.py`, `src/data/linux_journal.py`, `src/data/macos_unified_log.py`)
+
+* `EventLogReader` — the reader seam. Each platform implements it over its
+  own event log: the Windows Event Log (`pywin32`, falling back to
+  `wevtutil`), the systemd journal (`journalctl`), and the macOS unified log
+  (`log show`).
+* `SystemEventCollector` — the shared collector. It enforces the same
+  guarantees on every platform: an explicit allowlist, a bounded time window,
+  a maximum number of records, stable record identifiers, checkpoint
+  de-duplication, and honest error reporting (a log that cannot be read is
+  never presented as "no events").
+* The platform readers are separate modules and are imported lazily, so one
+  platform's tooling can never break another operating system.
+* Collected events are ingested through the ordinary `TelemetryIngestionService`
+  and therefore carry the same `source` and `host_id` provenance as every
+  other record.
+
 ### 3.2 Telemetry model (`src/data/schemas.py`)
 
 | Model | Purpose | Provenance fields |
@@ -257,6 +274,14 @@ depend on a browser session remaining open.
   live smoke test for the running platform.
 * `tests/test_windows_event_log.py` — allowlist filtering, bounding,
   deduplication, checkpointing, and error handling.
+* `tests/test_platform_event_logs.py` — the Linux journal and macOS unified
+  log readers: allowlists, bounding, deduplication, checkpointing, parsing,
+  error handling, and the per-platform reader selection.
+* `tests/test_correlation_equivalence.py` — a recorded digest of every
+  decision the correlation engine makes, so a performance change can never
+  change an outcome.
+* `tests/test_demonstration_performance.py` — the demonstration's wall clock
+  and the equivalence of the batched and per-row evidence writes.
 * `tests/test_agent.py` — agent configuration, ingestion, lifecycle, retention.
 * `tests/test_monitoring.py` — source inventory, status derivation, mode
   resolution.

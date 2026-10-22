@@ -398,7 +398,13 @@ class SupabaseStorage(Storage):
     # ------------------------------------------------------------------
 
     def save_evidence(self, evidence: Evidence) -> Evidence:
-        """Insert an evidence relationship and return the domain model."""
+        """Insert an evidence relationship and return the domain model.
+
+        The write is an upsert on the evidence id, so re-saving the same
+        evidence link updates the stored row instead of failing on the primary
+        key. This matches the in-memory and SQLite backends, which are keyed
+        by id.
+        """
 
         columns = self._provenance_columns("evidence")
         payload = {
@@ -417,7 +423,7 @@ class SupabaseStorage(Storage):
         response = (
             self._client
             .table("evidence")
-            .insert(payload)
+            .upsert(payload)
             .execute()
         )
 
@@ -440,6 +446,60 @@ class SupabaseStorage(Storage):
                 **self._provenance_row(row, "evidence"),
             }
         )
+
+    def save_evidence_batch(self, evidence: list[Evidence]) -> list[Evidence]:
+        """Persist many evidence relationships in a single request.
+
+        One analysis run can produce tens of thousands of evidence links. One
+        request replaces tens of thousands of round trips.
+        """
+        if not evidence:
+            return []
+
+        columns = self._provenance_columns("evidence")
+        payloads = [
+            {
+                "id": str(item.id),
+                "source_id": str(item.source_id),
+                "source_type": item.source_type,
+                "target_id": str(item.target_id),
+                "target_type": item.target_type,
+                "relationship_type": item.relationship_type,
+                "timestamp": item.timestamp.isoformat(),
+                "strength": item.strength,
+                "explanation": item.explanation,
+                **self._provenance_payload(item, columns),
+            }
+            for item in evidence
+        ]
+
+        response = (
+            self._client
+            .table("evidence")
+            .upsert(payloads)
+            .execute()
+        )
+
+        if len(response.data) != len(evidence):
+            raise RuntimeError("Failed to save all evidence.")
+
+        return [
+            Evidence.model_validate(
+                {
+                    "id": row["id"],
+                    "source_id": row["source_id"],
+                    "source_type": row["source_type"],
+                    "target_id": row["target_id"],
+                    "target_type": row["target_type"],
+                    "relationship_type": row["relationship_type"],
+                    "timestamp": row["timestamp"],
+                    "strength": row["strength"],
+                    "explanation": row["explanation"],
+                    **self._provenance_row(row, "evidence"),
+                }
+            )
+            for row in response.data
+        ]
 
     def get_evidence(
         self,
@@ -531,7 +591,13 @@ class SupabaseStorage(Storage):
     # ------------------------------------------------------------------
 
     def save_incident(self, incident: Incident) -> Incident:
-        """Insert an incident and return the domain model."""
+        """Insert an incident and return the domain model.
+
+        The write is an upsert on the incident id, so re-saving an incident
+        (for example when it moves from ``open`` to ``investigating``) updates
+        the stored row instead of failing on the primary key. This matches the
+        in-memory and SQLite backends, which are keyed by id.
+        """
 
         columns = self._provenance_columns("incidents")
         payload = {
@@ -553,7 +619,7 @@ class SupabaseStorage(Storage):
         response = (
             self._client
             .table("incidents")
-            .insert(payload)
+            .upsert(payload)
             .execute()
         )
 
